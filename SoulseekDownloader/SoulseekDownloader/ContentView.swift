@@ -2,44 +2,39 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var playlistURL = ""
-    @State private var songs: [Song] = []
-    @State private var isDownloading = false
-    private let youTube = YouTube()
-    private let titleCleaner = TitleCleaner()
-    private let soulseek = Soulseek()
+    @State private var username = ""
+    @State private var password = ""
+    @State private var downloadPath = ""
+    @State private var outputText = ""
+    private let slskBatchDL = SlskBatchDL()
 
     var body: some View {
         VStack {
             TextField("Enter YouTube Playlist URL", text: $playlistURL)
                 .padding()
+            TextField("Soulseek Username", text: $username)
+                .padding()
+            SecureField("Soulseek Password", text: $password)
+                .padding()
+            TextField("Download Path", text: $downloadPath)
+                .padding()
             Button("Download Songs") {
-                isDownloading = true
-                youTube.getPlaylistTitles(url: playlistURL) { titles in
-                    if let titles = titles {
-                        self.songs = titles.map { Song(title: titleCleaner.clean(title: $0)) }
-                        for i in 0..<self.songs.count {
-                            self.songs[i].status = "Downloading"
-                            soulseek.download(song: self.songs[i].title)
-                            self.songs[i].status = "Downloaded"
-                        }
-                    }
-                    isDownloading = false
+                outputText = ""
+                slskBatchDL.download(
+                    playlistURL: playlistURL,
+                    username: username,
+                    password: password,
+                    downloadPath: downloadPath
+                ) { output in
+                    outputText += output
                 }
             }
             .padding()
-            .disabled(isDownloading)
-
-            if isDownloading {
-                ProgressView()
+            ScrollView {
+                Text(outputText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            List(songs) { song in
-                HStack {
-                    Text(song.title)
-                    Spacer()
-                    Text(song.status)
-                }
-            }
+            .padding()
         }
         .padding()
     }
