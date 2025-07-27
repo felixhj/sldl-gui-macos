@@ -1,0 +1,13 @@
+# SoulseekDownloader Python Dependencies
+# This application uses only Python standard library modules
+# No additional packages are required
+
+# The following are built-in Python modules used:
+# - tkinter (GUI framework)
+# - subprocess (for running sldl command)
+# - threading (for non-blocking downloads)
+# - os, sys, pathlib (file system operations)
+
+# If you want to create a standalone executable, you can use:
+# pip install pyinstaller
+# pyinstaller --onefile --windowed soulseek_downloader.py 
