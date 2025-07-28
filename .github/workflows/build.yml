@@ -51,7 +51,7 @@ jobs:
           pyinstaller --noconfirm --windowed --name="SoulseekDownloader" \
             --add-binary="sldl:." \
             --add-data="csv_processor.py:." \
-            --icon=icon.icns \ # You will need to add an icon.icns file to your repo
+            --icon=icon.icns \
             soulseek_downloader.py
 
       - name: Package the application
