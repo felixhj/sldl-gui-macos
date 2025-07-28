@@ -34,18 +34,18 @@ Before using SoulseekDownloader, you need to have the `sldl` command-line tool i
 
 ### Installing sldl
 
-The `sldl` tool is the command-line interface for [slsk-batchdl](https://github.com/fiso64/slsk-batchdl). The installer automatically downloads and installs the latest version to your home directory (`~/bin/`) and adds it to your PATH.
+The `sldl` tool is the command-line interface for [slsk-batchdl](https://github.com/fiso64/slsk-batchdl). The installer automatically downloads and installs the latest version to your home directory (`~/.bin/`) and adds it to your PATH.
 
 If you need to install it manually:
 
 1.  **Download**: Get the latest release from the [slsk-batchdl releases page](https://github.com/fiso64/slsk-batchdl/releases).
 2.  **Extract**: Unzip the downloaded file.
-3.  **Install**: Make the `sldl` binary executable and move it to your home directory.
+3.  **Install**: Make the `sldl` binary executable and move it to your hidden bin directory.
     ```bash
     chmod +x sldl
-    mkdir -p ~/bin
-    mv sldl ~/bin/
-    echo 'export PATH="$HOME/bin:$PATH"' >> ~/.zshrc
+    mkdir -p ~/.bin
+    mv sldl ~/.bin/
+    echo 'export PATH="$HOME/.bin:$PATH"' >> ~/.zshrc
     source ~/.zshrc
     ```
 
@@ -174,7 +174,7 @@ If you get this error when trying to run SoulseekDownloader:
 1. **Check if sldl is installed:**
 
    ```bash
-   ls -la ~/bin/sldl
+   ls -la ~/.bin/sldl
    ```
 
 2. **If not installed, install manually:**
@@ -188,14 +188,14 @@ If you get this error when trying to run SoulseekDownloader:
 
    unzip sldl.zip
    chmod +x sldl
-   mkdir -p ~/bin
-   mv sldl ~/bin/
+   mkdir -p ~/.bin
+   mv sldl ~/.bin/
    ```
 
 3. **Add to PATH if needed:**
 
    ```bash
-   echo 'export PATH="$HOME/bin:$PATH"' >> ~/.zshrc
+   echo 'export PATH="$HOME/.bin:$PATH"' >> ~/.zshrc
    source ~/.zshrc
    ```
 
@@ -214,7 +214,7 @@ If you get this error when trying to run SoulseekDownloader:
 - **Python**: 3.9+
 - **OS**: macOS
 - **Dependencies**: `pyobjc-framework-Cocoa`
-- **`sldl`**: Automatically installed to `~/bin/` by the installer
+- **`sldl`**: Automatically installed to `~/.bin/` by the installer
 
 ## License
 

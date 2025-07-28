@@ -51,8 +51,8 @@ main() {
     SLDL_ARCH="arm64"
   fi
   
-  # Create user's bin directory
-  USER_BIN_DIR="$HOME/bin"
+  # Create user's hidden bin directory
+  USER_BIN_DIR="$HOME/.bin"
   info "Creating user bin directory: $USER_BIN_DIR"
   mkdir -p "$USER_BIN_DIR"
   
@@ -75,7 +75,7 @@ main() {
   mv /tmp/sldl "$USER_BIN_DIR/" || fail "Failed to install sldl to $USER_BIN_DIR"
   rm "$TEMP_SLDL"
   
-  # Add user's bin directory to PATH if not already there
+  # Add user's hidden bin directory to PATH if not already there
   info "Adding $USER_BIN_DIR to PATH..."
   if ! echo "$PATH" | grep -q "$USER_BIN_DIR"; then
     echo "export PATH=\"$USER_BIN_DIR:\$PATH\"" >> ~/.zshrc
