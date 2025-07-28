@@ -38,7 +38,7 @@ jobs:
 
       - name: Download and Extract slsk-batchdl
         run: |
-          DOWNLOAD_URL=$(curl -s https://api.github.com/repos/fiso64/slsk-batchdl/releases/latest | jq -r '.assets[] | select(.name == "sldl-osx-${{ matrix.arch }}.zip") | .browser_download_url')
+          DOWNLOAD_URL=$(curl -s https://api.github.com/repos/fiso64/slsk-batchdl/releases/latest | jq -r ".assets[] | select(.name == \"sldl-osx-${{ matrix.arch }}.zip\") | .browser_download_url")
           echo "Found download URL: $DOWNLOAD_URL"
           curl -L -o sldl.zip "$DOWNLOAD_URL"
           unzip sldl.zip
