@@ -40,7 +40,7 @@ jobs:
         uses: robinraju/release-downloader@v1.9
         with:
           repository: 'fiso64/slsk-batchdl'
-          tag: 'latest'
+          latest: true
           fileName: 'sldl-osx-${{ matrix.arch }}.zip'
           extract: true
 
