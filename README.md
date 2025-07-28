@@ -48,8 +48,12 @@ The `sldl` tool is the [slsk-batchdl](https://github.com/fiso64/slsk-batchdl) So
 
 1. Clone or download this repository
 2. Ensure you have Python 3.6+ installed
-3. Install the `sldl` command-line tool (see Prerequisites above)
-4. Run the application using one of the methods below
+3. Install the Python dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. Install the `sldl` command-line tool (see Prerequisites above)
+5. Run the application using one of the methods below
 
 ### Running the Application
 
@@ -136,10 +140,10 @@ Settings are saved automatically as you type and when you close the application.
 
 ```
 SoulseekDownloader/
-├── soulseek_downloader.py             # Main Python application (1,127 lines)
+├── soulseek_downloader.py             # Main PyObjC-based Cocoa application
 ├── csv_processor.py                   # Standalone CSV processing module (212 lines)
 ├── run_soulseek_downloader.sh         # Launcher script for easy execution
-├── requirements.txt                   # Python dependencies (uses only standard library)
+├── requirements.txt                   # Python dependencies (includes PyObjC)
 ├── README.md                          # This documentation file
 ├── _index_processed.csv               # Example processed CSV output
 ├── sldl_osx-x64/                     # Pre-compiled slsk-batchdl executable (macOS x64)
@@ -155,10 +159,10 @@ SoulseekDownloader/
 
 ### Key Components
 
-- **soulseek_downloader.py**: The main Python application with modern GUI, download logic, and thread-safe operations
+- **soulseek_downloader.py**: PyObjC-based Cocoa application with download logic and thread-safe operations
 - **csv_processor.py**: Standalone module for processing CSV files and adding human-readable error descriptions
 - **run_soulseek_downloader.sh**: Shell script launcher for easy execution with Python version detection
-- **requirements.txt**: Lists Python dependencies (uses only standard library modules)
+- **requirements.txt**: Lists Python dependencies including PyObjC
 - **sldl_osx-x64/**: Contains pre-compiled slsk-batchdl executable for macOS x64
 - **slsk-batchdl-master/**: Complete source code of the slsk-batchdl tool
 
@@ -182,8 +186,8 @@ The application works by:
 - **Robust Error Handling**: Comprehensive error handling with user-friendly messages and debug output
 - **Modular Architecture**: CSV processing logic separated into reusable, standalone module
 - **Settings Management**: Automatic persistence with base64 encoding for password obfuscation
-- **Cross-platform Compatibility**: Works on Windows, macOS, and Linux with proper font fallbacks
-- **No External Dependencies**: Uses only Python standard library modules
+- **Native macOS Application**: Built with PyObjC and Cocoa for a macOS interface
+- **PyObjC-Based GUI**: Requires the `pyobjc-framework-Cocoa` package
 
 ## CSV Processing and Error Codes
 
