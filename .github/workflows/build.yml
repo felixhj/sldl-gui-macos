@@ -53,23 +53,28 @@ jobs:
           chmod +x sldl
 
       - name: Import Signing Certificate
+        env:
+          SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
         run: |
-          # Debugging: Check if the secret is being passed
-          CERT_PASS_LENGTH=${#SIGNING_CERTIFICATE_PASSWORD}
-          echo "Certificate password length: $CERT_PASS_LENGTH"
-          if [ "$CERT_PASS_LENGTH" -eq 0 ]; then
-            echo "::error::Signing certificate password secret is empty."
+          # Decode the certificate
+          printf "%s" "${{ secrets.SIGNING_CERTIFICATE_P12 }}" | base64 --decode > certificate.p12
+
+          # Verify the certificate and password
+          echo "Verifying certificate with OpenSSL..."
+          openssl pkcs12 -in certificate.p12 -noout -passin env:SIGNING_CERTIFICATE_PASSWORD
+          if [ $? -ne 0 ]; then
+            echo "::error::OpenSSL failed to verify the certificate with the provided password."
             exit 1
           fi
+          echo "Certificate verified successfully."
 
-          # Create a temporary keychain
+          # Create and prepare the keychain
           security create-keychain -p "" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "" build.keychain
 
-          # Decode and import the certificate from secrets
-          echo "${{ secrets.SIGNING_CERTIFICATE_P12 }}" | base64 --decode > certificate.p12
-          security import certificate.p12 -k build.keychain -P "${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
+          # Import the certificate into the keychain
+          security import certificate.p12 -k build.keychain -P "$SIGNING_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
 
           # Allow codesign to access the keychain
           security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
