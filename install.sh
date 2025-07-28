@@ -58,7 +58,8 @@ main() {
   # 4. Install
   step "Installing..."
   info "Mounting the disk image..."
-  MOUNT_POINT=$(hdiutil attach "$TEMP_DMG" -nobrowse -quiet | grep "/Volumes/" | awk '{print $3}')
+  MOUNT_OUTPUT=$(hdiutil attach "$TEMP_DMG" -nobrowse)
+  MOUNT_POINT=$(echo "$MOUNT_OUTPUT" | grep "/Volumes/" | sed 's/.*\(\/Volumes\/.*\)/\1/' | head -1)
   
   if [ -z "$MOUNT_POINT" ]; then
     fail "Failed to mount the disk image."
