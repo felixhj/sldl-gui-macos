@@ -70,7 +70,21 @@ main() {
   sudo mv /tmp/sldl /usr/local/bin/ || fail "Failed to install sldl to /usr/local/bin"
   rm "$TEMP_SLDL"
   
-  success "slsk-batchdl installed successfully"
+  # Verify installation and add to PATH if needed
+  info "Verifying sldl installation..."
+  if ! command -v sldl &> /dev/null; then
+    info "sldl not found in PATH, adding /usr/local/bin to PATH..."
+    echo 'export PATH="/usr/local/bin:$PATH"' >> ~/.zshrc
+    export PATH="/usr/local/bin:$PATH"
+    info "Please restart your terminal or run: source ~/.zshrc"
+  fi
+  
+  # Test sldl
+  if sldl --version &> /dev/null; then
+    success "slsk-batchdl installed successfully"
+  else
+    fail "sldl installation verification failed"
+  fi
 
   # 3. Detect macOS Version and Find the Latest Release Asset
   step "Finding and downloading the latest release..."

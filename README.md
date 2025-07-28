@@ -162,7 +162,44 @@ The final `log.csv` will contain these descriptive columns, providing a clear su
 
 ## Troubleshooting
 
-- **"sldl command not found"**: Ensure `sldl` is installed and its location is in your system's PATH. Verify by running `which sldl` in your terminal.
+### "sldl command not found" Error
+
+If you get this error when trying to run SoulseekDownloader:
+
+1. **Check if sldl is installed:**
+
+   ```bash
+   ls -la /usr/local/bin/sldl
+   ```
+
+2. **If not installed, install manually:**
+
+   ```bash
+   # For Apple Silicon (M1/M2) Macs:
+   curl -L -o sldl.zip "https://github.com/fiso64/slsk-batchdl/releases/latest/download/sldl_osx-arm64.zip"
+
+   # For Intel Macs:
+   curl -L -o sldl.zip "https://github.com/fiso64/slsk-batchdl/releases/latest/download/sldl_osx-x64.zip"
+
+   unzip sldl.zip
+   chmod +x sldl
+   sudo mv sldl /usr/local/bin/
+   ```
+
+3. **Add to PATH if needed:**
+
+   ```bash
+   echo 'export PATH="/usr/local/bin:$PATH"' >> ~/.zshrc
+   source ~/.zshrc
+   ```
+
+4. **Verify installation:**
+   ```bash
+   sldl --version
+   ```
+
+### Other Issues
+
 - **Authentication Failures**: Double-check your Soulseek credentials.
 - **CSV Processing Fails**: Ensure the download directory is writable, as the script needs to create `log.csv` and delete the original `_index.csv`.
 
