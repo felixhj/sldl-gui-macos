@@ -89,21 +89,28 @@ jobs:
             --codesign-identity="SoulseekDownloader Developer" \
             soulseek_downloader.py
 
-      - name: Package the application
+      - name: Create DMG
         run: |
-          mkdir -p release
-          # The output of PyInstaller is a .app bundle on macOS
-          ditto -c -k --sequesterRsrc --keepParent dist/SoulseekDownloader.app release/SoulseekDownloader-macOS-${{ matrix.arch }}.zip
+          brew install create-dmg
+          create-dmg \
+            --volname "SoulseekDownloader Installer" \
+            --window-pos 200 120 \
+            --window-size 800 400 \
+            --icon-size 100 \
+            --icon "SoulseekDownloader.app" 200 190 \
+            --hide-extension "SoulseekDownloader.app" \
+            --app-drop-link 600 185 \
+            "SoulseekDownloader-${{ matrix.arch }}.dmg" \
+            "dist/SoulseekDownloader.app"
 
       - name: Create Release and Upload Asset
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: release/SoulseekDownloader-macOS-${{ matrix.arch }}.zip
-          draft: true # Creates a draft release, you can publish it manually
+          files: '*.dmg'
+          draft: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
 
       - name: Clean up keychain
         if: always()

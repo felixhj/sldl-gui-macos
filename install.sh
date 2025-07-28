@@ -43,36 +43,44 @@ main() {
 
   # 2. Find and Download the Latest Release Asset
   step "Finding and downloading the latest release..."
-  ASSET_NAME="SoulseekDownloader-macOS-${ARCH}.zip"
   
-  # Construct a direct download URL to the latest release asset
+  # Try the most common DMG naming pattern first
+  ASSET_NAME="SoulseekDownloader-${ARCH}.dmg"
   DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/latest/download/${ASSET_NAME}"
   
   info "Downloading from: $DOWNLOAD_URL"
 
-  # 3. Download and Unpack
-  TEMP_FILE=$(mktemp)
+  # 3. Download and Mount
+  TEMP_DMG=$(mktemp -u).dmg
   # Use curl with -f to fail fast on 404s and -L to follow redirects
-  curl -fL -o "$TEMP_FILE" "$DOWNLOAD_URL" || fail "Download failed. Could not find asset '$ASSET_NAME' in the latest release."
+  curl -fL -o "$TEMP_DMG" "$DOWNLOAD_URL" || fail "Download failed. Could not find asset '$ASSET_NAME' in the latest release."
   
   # 4. Install
   step "Installing..."
-  INSTALL_DIR="$HOME/Applications/SoulseekDownloader"
-  info "Creating installation directory at $INSTALL_DIR"
+  info "Mounting the disk image..."
+  MOUNT_POINT=$(hdiutil attach "$TEMP_DMG" -nobrowse -quiet | grep "/Volumes/" | awk '{print $3}')
+  
+  if [ -z "$MOUNT_POINT" ]; then
+    fail "Failed to mount the disk image."
+  fi
+  
+  INSTALL_DIR="$HOME/Applications"
+  info "Installing to $INSTALL_DIR"
   mkdir -p "$INSTALL_DIR"
   
-  info "Unzipping the application..."
-  # Unzip directly into the install directory, overwriting existing files
-  unzip -o "$TEMP_FILE" -d "$INSTALL_DIR" || fail "Failed to unzip the application."
+  info "Copying the application..."
+  # Copy the app from the mounted DMG to Applications
+  cp -R "$MOUNT_POINT/SoulseekDownloader.app" "$INSTALL_DIR/" || fail "Failed to copy the application."
   
   # 5. Clean up
-  info "Cleaning up temporary files..."
-  rm "$TEMP_FILE"
+  info "Cleaning up..."
+  hdiutil detach "$MOUNT_POINT" -quiet
+  rm "$TEMP_DMG"
 
   success "Installation complete!"
   echo ""
   echo "You can now find SoulseekDownloader in:"
-  echo "$INSTALL_DIR"
+  echo "$INSTALL_DIR/SoulseekDownloader.app"
   echo ""
   echo "To run it, you can double-click the app or use this command:"
   echo "open \"$INSTALL_DIR/SoulseekDownloader.app\""
