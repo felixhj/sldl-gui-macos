@@ -58,9 +58,11 @@ jobs:
             --add-binary="sldl:." \
             --add-data="csv_processor.py:." \
             --icon=icon.icns \
-            --codesign-identity="-" \
-            --osx-entitlements-file="entitlements.plist" \
             soulseek_downloader.py
+
+      - name: Sign the application bundle
+        run: |
+          codesign --force --deep --sign - --entitlements entitlements.plist --options runtime "dist/SoulseekDownloader.app"
 
       - name: Package the application
         run: |

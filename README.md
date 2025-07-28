@@ -44,7 +44,7 @@ The `sldl` tool is the command-line interface for [slsk-batchdl](https://github.
 To install SoulseekDownloader on your macOS computer, open the Terminal application and run the following command. It will automatically detect your architecture and install the correct version of the application.
 
 ```bash
-bash <(curl -sL https://raw.githubusercontent.com/felixhj/sk/main/install.sh)
+bash <(curl -sL https://raw.githubusercontent.com/felixhj/sk/pyobjc-implementation/install.sh)
 ```
 
 The application will be installed in `~/Applications/SoulseekDownloader`.
