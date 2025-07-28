@@ -38,7 +38,7 @@ jobs:
 
       - name: Download slsk-batchdl
         run: |
-          SLSK_VERSION=$(curl -s "https://api.github.com/repos/fiso64/slsk-batchdl/releases/latest" | grep -Po '"tag_name": "\K.*?(?=")')
+          SLSK_VERSION=$(curl -s "https://api.github.com/repos/fiso64/slsk-batchdl/releases/latest" | jq -r .tag_name)
           SLSK_URL="https://github.com/fiso64/slsk-batchdl/releases/download/${SLSK_VERSION}/sldl-osx-${{ matrix.arch }}.zip"
           echo "Downloading slsk-batchdl from $SLSK_URL"
           curl -L -o sldl.zip "$SLSK_URL"
