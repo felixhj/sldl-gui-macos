@@ -41,11 +41,27 @@ main() {
   fi
   info "Detected architecture: $ARCH"
 
-  # 2. Find and Download the Latest Release Asset
+  # 2. Detect macOS Version and Find the Latest Release Asset
   step "Finding and downloading the latest release..."
   
-  # Try the most common DMG naming pattern first
-  ASSET_NAME="SoulseekDownloader-${ARCH}.dmg"
+  # Detect macOS version to choose the right build
+  MACOS_VERSION=$(sw_vers -productVersion | cut -d. -f1,2)
+  info "Detected macOS version: $MACOS_VERSION"
+  
+  # Determine which build to download based on macOS version
+  if [[ "$MACOS_VERSION" == "12."* ]]; then
+    OS_SUFFIX="monterey"
+  elif [[ "$MACOS_VERSION" == "13."* ]]; then
+    OS_SUFFIX="ventura"
+  elif [[ "$MACOS_VERSION" == "14."* ]]; then
+    OS_SUFFIX="sonoma"
+  else
+    # For future macOS versions, default to sonoma build
+    OS_SUFFIX="sonoma"
+  fi
+  
+  # Try the version-specific DMG naming pattern
+  ASSET_NAME="SoulseekDownloader-${ARCH}-${OS_SUFFIX}.dmg"
   DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/latest/download/${ASSET_NAME}"
   
   info "Downloading from: $DOWNLOAD_URL"

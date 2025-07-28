@@ -14,6 +14,9 @@ jobs:
     strategy:
       matrix:
         include:
+          - os: macos-12 # Monterey for x86_64 (Intel)
+            arch: x64
+            python-version: '3.9'
           - os: macos-13 # Ventura for x86_64
             arch: x64
             python-version: '3.9'
@@ -92,6 +95,14 @@ jobs:
       - name: Create DMG
         run: |
           brew install create-dmg
+          # Determine macOS version for naming
+          if [ "${{ matrix.os }}" = "macos-12" ]; then
+            OS_VERSION="monterey"
+          elif [ "${{ matrix.os }}" = "macos-13" ]; then
+            OS_VERSION="ventura"
+          elif [ "${{ matrix.os }}" = "macos-14" ]; then
+            OS_VERSION="sonoma"
+          fi
           create-dmg \
             --volname "SoulseekDownloader Installer" \
             --window-pos 200 120 \
@@ -100,7 +111,7 @@ jobs:
             --icon "SoulseekDownloader.app" 200 190 \
             --hide-extension "SoulseekDownloader.app" \
             --app-drop-link 600 185 \
-            "SoulseekDownloader-${{ matrix.arch }}.dmg" \
+            "SoulseekDownloader-${{ matrix.arch }}-$OS_VERSION.dmg" \
             "dist/SoulseekDownloader.app"
 
       - name: Create Release and Upload Asset

@@ -23,6 +23,11 @@ After the download process is complete, the application automatically finds the 
 - **Modern UI**: Clean, intuitive interface built with native Cocoa and PyObjC.
 - **Thread-Safe Operations**: Downloads run in a background thread to keep the GUI responsive.
 
+## System Requirements
+
+- **macOS**: 12.0 (Monterey) or later
+- **Architecture**: Intel (x64) or Apple Silicon (arm64)
+
 ## Prerequisites
 
 Before using SoulseekDownloader, you need to have the `sldl` command-line tool installed on your system. The application expects `sldl` to be available in your system's PATH.
@@ -48,6 +53,16 @@ bash <(curl -sL https://raw.githubusercontent.com/felixhj/sk/pyobjc-implementati
 ```
 
 The application will be installed in `~/Applications/SoulseekDownloader`.
+
+### Build Variants
+
+The application is built for different macOS versions to ensure compatibility:
+
+- **Monterey (macOS 12)**: For users on macOS 12.0 or later
+- **Ventura (macOS 13)**: For users on macOS 13.0 or later
+- **Sonoma (macOS 14)**: For users on macOS 14.0 or later
+
+The installer automatically selects the appropriate version for your system.
 
 ### Running the Application
 
