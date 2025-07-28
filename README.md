@@ -64,6 +64,8 @@ The application is built for different macOS versions to ensure compatibility:
 
 The installer automatically selects the appropriate version for your system.
 
+> **Note**: Monterey builds are created locally since GitHub Actions no longer supports macOS 12 runners. See [BUILD_MONTEREY.md](BUILD_MONTEREY.md) for details on building Monterey versions locally.
+
 ### Running the Application
 
 After the installation is complete, you can find the application in the folder mentioned above. You can run it in two ways:
