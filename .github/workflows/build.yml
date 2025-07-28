@@ -36,15 +36,16 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Download slsk-batchdl
-        run: |
-          SLSK_VERSION=$(curl -s "https://api.github.com/repos/fiso64/slsk-batchdl/releases/latest" | jq -r .tag_name)
-          SLSK_URL="https://github.com/fiso64/slsk-batchdl/releases/download/${SLSK_VERSION}/sldl-osx-${{ matrix.arch }}.zip"
-          echo "Downloading slsk-batchdl from $SLSK_URL"
-          curl -L -o sldl.zip "$SLSK_URL"
-          unzip sldl.zip -d sldl_extracted
-          # Move the executable to the root for PyInstaller to find it
-          mv sldl_extracted/sldl .
+      - name: Download and Extract slsk-batchdl
+        uses: robinraju/release-downloader@v1.9
+        with:
+          repository: 'fiso64/slsk-batchdl'
+          tag: 'latest'
+          fileName: 'sldl-osx-${{ matrix.arch }}.zip'
+          extract: true
+
+      - name: Move sldl executable for PyInstaller
+        run: mv sldl-osx-${{ matrix.arch }}/sldl .
 
       - name: Build the application with PyInstaller
         run: |
