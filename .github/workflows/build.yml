@@ -38,9 +38,18 @@ jobs:
 
       - name: Download and Extract slsk-batchdl
         env:
-          ASSET_NAME: sldl-osx-${{ matrix.arch }}.zip
+          ASSET_NAME: sldl_osx-${{ matrix.arch }}.zip
         run: |
+          echo "Attempting to find asset: $ASSET_NAME"
           DOWNLOAD_URL=$(curl -s https://api.github.com/repos/fiso64/slsk-batchdl/releases/latest | jq --arg name "$ASSET_NAME" -r '.assets[] | select(.name == $name) | .browser_download_url')
+
+          if [ -z "$DOWNLOAD_URL" ]; then
+            echo "::error::Asset '$ASSET_NAME' not found in the latest release."
+            echo "Available assets are:"
+            curl -s https://api.github.com/repos/fiso64/slsk-batchdl/releases/latest | jq -r '.assets[].name'
+            exit 1
+          fi
+
           echo "Found download URL: $DOWNLOAD_URL"
           curl -L -o sldl.zip "$DOWNLOAD_URL"
           unzip sldl.zip
