@@ -1,3 +1,13 @@
 # SoulseekDownloader Python Dependencies
 # Requires PyObjC for the Cocoa GUI implementation
-pyobjc-framework-Cocoa
+
+# Core PyObjC frameworks for macOS GUI
+pyobjc-framework-Cocoa>=10.0
+pyobjc-core>=10.0
+
+# Optional: Additional PyObjC frameworks that might be useful
+# pyobjc-framework-Quartz>=10.0
+
+# Note: This application also requires the 'sldl' command-line tool from
+# the slsk-batchdl project to be installed separately.
+# See README.md for installation instructions.

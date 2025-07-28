@@ -61,9 +61,9 @@ class SLDLCSVProcessor:
                 print(f"Error: Input file '{input_file}' does not exist.")
                 return False
             
-            # Generate output filename if not provided
+            # Generate output filename to be 'log.csv' in the same directory
             if output_file is None:
-                output_path = input_path.parent / f"{input_path.stem}_processed{input_path.suffix}"
+                output_path = input_path.parent / 'log.csv'
             else:
                 output_path = Path(output_file)
             
@@ -99,8 +99,14 @@ class SLDLCSVProcessor:
                 writer.writeheader()
                 writer.writerows(rows)
             
+            # Delete the original file after successful processing
+            try:
+                input_path.unlink()
+                print(f"Successfully processed '{input_file}' -> '{output_path}' and deleted original file.")
+            except OSError as e:
+                print(f"Error deleting original file '{input_file}': {e}")
+
             self.processed_files.append(str(output_path))
-            print(f"Successfully processed '{input_file}' -> '{output_path}'")
             return True
             
         except Exception as e:
