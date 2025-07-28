@@ -52,17 +52,29 @@ jobs:
           ls -l
           chmod +x sldl
 
+      - name: Import Signing Certificate
+        run: |
+          # Create a temporary keychain
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+
+          # Decode and import the certificate from secrets
+          echo "${{ secrets.SIGNING_CERTIFICATE_P12 }}" | base64 --decode > certificate.p12
+          security import certificate.p12 -k build.keychain -P "${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
+
+          # Allow codesign to access the keychain
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
+
       - name: Build the application with PyInstaller
         run: |
           pyinstaller --noconfirm --windowed --name="SoulseekDownloader" \
             --add-binary="sldl:." \
             --add-data="csv_processor.py:." \
             --icon=icon.icns \
+            --osx-entitlements-file="entitlements.plist" \
+            --codesign-identity="SoulseekDownloader Developer" \
             soulseek_downloader.py
-
-      - name: Sign the application bundle
-        run: |
-          codesign --force --deep --sign - --entitlements entitlements.plist --options runtime "dist/SoulseekDownloader.app"
 
       - name: Package the application
         run: |
@@ -78,3 +90,9 @@ jobs:
           draft: true # Creates a draft release, you can publish it manually
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clean up keychain
+        if: always()
+        run: |
+          security delete-keychain build.keychain
+          rm -f certificate.p12
