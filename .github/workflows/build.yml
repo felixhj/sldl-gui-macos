@@ -44,13 +44,15 @@ jobs:
           fileName: 'sldl_osx-${{ matrix.arch }}.zip'
           extract: true
 
-      - name: Set execute permission on sldl
-        run: chmod +x sldl_osx-${{ matrix.arch }}/sldl
+      - name: Verify extracted files and set permissions
+        run: |
+          ls -l
+          chmod +x sldl
 
       - name: Build the application with PyInstaller
         run: |
           pyinstaller --noconfirm --windowed --name="SoulseekDownloader" \
-            --add-binary="sldl_osx-${{ matrix.arch }}/sldl:." \
+            --add-binary="sldl:." \
             --add-data="csv_processor.py:." \
             --icon=icon.icns \
             --codesign-identity="-" \
