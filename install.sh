@@ -85,11 +85,63 @@ main() {
     info "$USER_BIN_DIR already in PATH"
   fi
   
-  # Test sldl
+  # Test sldl with version-specific security handling
+  info "Testing sldl installation..."
+  
+  # Detect macOS version for security handling
+  MACOS_MAJOR=$(sw_vers -productVersion | cut -d. -f1)
+  MACOS_MINOR=$(sw_vers -productVersion | cut -d. -f2)
+  
   if "$USER_BIN_DIR/sldl" --version &> /dev/null; then
     success "slsk-batchdl installed successfully to $USER_BIN_DIR"
   else
-    fail "sldl installation verification failed"
+    # Handle security restrictions based on macOS version
+    if [ -f "$USER_BIN_DIR/sldl" ] && [ -x "$USER_BIN_DIR/sldl" ]; then
+      info "sldl binary exists and is executable, but may be blocked by macOS security"
+      
+      # macOS 13+ (Ventura and later) have stricter security
+      if [ "$MACOS_MAJOR" -ge 13 ]; then
+        info "Detected macOS $MACOS_MAJOR.$MACOS_MINOR - applying advanced security handling..."
+        
+        # Remove quarantine attributes
+        info "Removing quarantine attributes..."
+        xattr -d com.apple.quarantine "$USER_BIN_DIR/sldl" 2>/dev/null || true
+        
+        # Try running again
+        if "$USER_BIN_DIR/sldl" --version &> /dev/null; then
+          success "slsk-batchdl installed successfully to $USER_BIN_DIR (quarantine removed)"
+        else
+          # For macOS 15+ (Sequoia), provide specific instructions
+          if [ "$MACOS_MAJOR" -ge 15 ]; then
+            info "macOS 15+ detected - this version has the strictest security policies"
+            info "The binary is installed at: $USER_BIN_DIR/sldl"
+            info "You may need to:"
+            info "1. Go to System Settings > Privacy & Security > Developer Tools"
+            info "2. Add ~/.bin/sldl to the allowed applications list"
+            info "3. Or run: ~/.bin/sldl --version (to trigger security dialog)"
+            success "slsk-batchdl installed to $USER_BIN_DIR (manual approval required for macOS 15+)"
+          else
+            info "The binary is installed at: $USER_BIN_DIR/sldl"
+            info "You may need to allow it in System Settings > Privacy & Security > Developer Tools"
+            success "slsk-batchdl installed to $USER_BIN_DIR (manual approval may be required)"
+          fi
+        fi
+      else
+        # macOS 12 and earlier - simpler handling
+        info "Detected macOS $MACOS_MAJOR.$MACOS_MINOR - applying standard security handling..."
+        info "Attempting to remove quarantine attributes..."
+        xattr -d com.apple.quarantine "$USER_BIN_DIR/sldl" 2>/dev/null || true
+        
+        if "$USER_BIN_DIR/sldl" --version &> /dev/null; then
+          success "slsk-batchdl installed successfully to $USER_BIN_DIR (quarantine removed)"
+        else
+          info "sldl still blocked. The binary is installed at: $USER_BIN_DIR/sldl"
+          success "slsk-batchdl installed to $USER_BIN_DIR (may need manual approval)"
+        fi
+      fi
+    else
+      fail "sldl installation verification failed - binary not found or not executable"
+    fi
   fi
 
   # 3. Detect macOS Version and Find the Latest Release Asset

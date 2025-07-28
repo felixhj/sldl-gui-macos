@@ -204,6 +204,36 @@ If you get this error when trying to run SoulseekDownloader:
    sldl --version
    ```
 
+### macOS Security Restrictions (Ventura 13+)
+
+If you're on macOS 13 (Ventura) or later and get a "Killed: 9" error or "sldl installation verification failed":
+
+1. **Check if sldl is installed but blocked:**
+
+   ```bash
+   ls -la ~/.bin/sldl
+   ```
+
+2. **Remove quarantine attributes:**
+
+   ```bash
+   xattr -d com.apple.quarantine ~/.bin/sldl
+   ```
+
+3. **Allow in System Settings:**
+
+   - Go to **System Settings > Privacy & Security > Developer Tools**
+   - Click the lock icon to unlock
+   - Add `~/.bin/sldl` to the allowed applications list
+
+4. **Alternative: Run from terminal first:**
+   ```bash
+   ~/.bin/sldl --version
+   ```
+   This may trigger a security dialog that you can approve.
+
+**Note:** macOS 15 (Sequoia) has the strictest security policies and may require additional steps in System Settings > Privacy & Security > Developer Tools.
+
 ### Other Issues
 
 - **Authentication Failures**: Double-check your Soulseek credentials.
