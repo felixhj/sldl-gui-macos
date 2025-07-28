@@ -171,6 +171,20 @@ cleanup() {
     rm -f "sldl_osx-$ARCH.zip"
     rm -f sldl
     
+    # Remove virtual environment
+    rm -rf venv_monterey/
+    
+    # Remove Python cache files
+    rm -rf __pycache__/
+    find . -name "*.pyc" -delete
+    find . -name "*.pyo" -delete
+    
+    # Remove PyInstaller spec file if it exists
+    rm -f SoulseekDownloader.spec
+    
+    # Remove any temporary files
+    rm -f sldl.pdb
+    
     log_success "Cleanup complete"
 }
 

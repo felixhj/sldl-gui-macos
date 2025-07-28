@@ -41,7 +41,38 @@ main() {
   fi
   info "Detected architecture: $ARCH"
 
-  # 2. Detect macOS Version and Find the Latest Release Asset
+  # 2. Install slsk-batchdl (sldl) dependency
+  step "Installing slsk-batchdl dependency..."
+  
+  # Detect architecture for slsk-batchdl
+  if [ "$ARCH" = "x64" ]; then
+    SLDL_ARCH="x64"
+  elif [ "$ARCH" = "arm64" ]; then
+    SLDL_ARCH="arm64"
+  fi
+  
+  # Download latest slsk-batchdl release
+  info "Downloading latest slsk-batchdl..."
+  SLDL_URL=$(curl -s https://api.github.com/repos/fiso64/slsk-batchdl/releases/latest | grep "browser_download_url.*osx-$SLDL_ARCH.zip" | cut -d'"' -f4)
+  
+  if [ -z "$SLDL_URL" ]; then
+    fail "Could not find slsk-batchdl release for $SLDL_ARCH"
+  fi
+  
+  info "Downloading slsk-batchdl from: $SLDL_URL"
+  TEMP_SLDL=$(mktemp -u).zip
+  curl -fL -o "$TEMP_SLDL" "$SLDL_URL" || fail "Failed to download slsk-batchdl"
+  
+  # Extract and install sldl
+  info "Installing sldl to /usr/local/bin..."
+  unzip -o "$TEMP_SLDL" -d /tmp/
+  chmod +x /tmp/sldl
+  sudo mv /tmp/sldl /usr/local/bin/ || fail "Failed to install sldl to /usr/local/bin"
+  rm "$TEMP_SLDL"
+  
+  success "slsk-batchdl installed successfully"
+
+  # 3. Detect macOS Version and Find the Latest Release Asset
   step "Finding and downloading the latest release..."
   
   # Detect macOS version to choose the right build
@@ -66,7 +97,7 @@ main() {
   
   info "Downloading from: $DOWNLOAD_URL"
 
-  # 3. Download and Mount
+  # 4. Download and Mount
   TEMP_DMG=$(mktemp -u).dmg
   # Use curl with -f to fail fast on 404s and -L to follow redirects
   curl -fL -o "$TEMP_DMG" "$DOWNLOAD_URL" || fail "Download failed. Could not find asset '$ASSET_NAME' in the latest release."
@@ -93,6 +124,7 @@ main() {
   info "Cleaning up..."
   hdiutil detach "$MOUNT_POINT" -quiet
   rm "$TEMP_DMG"
+  rm -f /tmp/sldl  # Clean up any remaining slsk-batchdl files
 
   success "Installation complete!"
   echo ""
