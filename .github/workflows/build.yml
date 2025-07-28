@@ -54,6 +54,14 @@ jobs:
 
       - name: Import Signing Certificate
         run: |
+          # Debugging: Check if the secret is being passed
+          CERT_PASS_LENGTH=${#SIGNING_CERTIFICATE_PASSWORD}
+          echo "Certificate password length: $CERT_PASS_LENGTH"
+          if [ "$CERT_PASS_LENGTH" -eq 0 ]; then
+            echo "::error::Signing certificate password secret is empty."
+            exit 1
+          fi
+
           # Create a temporary keychain
           security create-keychain -p "" build.keychain
           security default-keychain -s build.keychain
@@ -90,6 +98,7 @@ jobs:
           draft: true # Creates a draft release, you can publish it manually
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
 
       - name: Clean up keychain
         if: always()
