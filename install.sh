@@ -41,22 +41,19 @@ main() {
   fi
   info "Detected architecture: $ARCH"
 
-  # 2. Find the Latest Release Asset
-  step "Finding the latest release..."
+  # 2. Find and Download the Latest Release Asset
+  step "Finding and downloading the latest release..."
   ASSET_NAME="SoulseekDownloader-macOS-${ARCH}.zip"
   
-  API_URL="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
-  DOWNLOAD_URL=$(curl -s "$API_URL" | jq --arg name "$ASSET_NAME" -r '.assets[] | select(.name == $name) | .browser_download_url')
-
-  if [ -z "$DOWNLOAD_URL" ]; then
-    fail "Could not find a release asset named '$ASSET_NAME' for your architecture."
-  fi
-  info "Found release asset: $DOWNLOAD_URL"
+  # Construct a direct download URL to the latest release asset
+  DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/latest/download/${ASSET_NAME}"
+  
+  info "Downloading from: $DOWNLOAD_URL"
 
   # 3. Download and Unpack
-  step "Downloading the application..."
   TEMP_FILE=$(mktemp)
-  curl -L -o "$TEMP_FILE" "$DOWNLOAD_URL" || fail "Download failed."
+  # Use curl with -f to fail fast on 404s and -L to follow redirects
+  curl -fL -o "$TEMP_FILE" "$DOWNLOAD_URL" || fail "Download failed. Could not find asset '$ASSET_NAME' in the latest release."
   
   # 4. Install
   step "Installing..."

@@ -59,6 +59,7 @@ jobs:
             --add-data="csv_processor.py:." \
             --icon=icon.icns \
             --codesign-identity="-" \
+            --osx-entitlements-file="entitlements.plist" \
             soulseek_downloader.py
 
       - name: Package the application

@@ -41,35 +41,27 @@ The `sldl` tool is the command-line interface for [slsk-batchdl](https://github.
 
 ## Installation
 
-1.  **Clone the Repository**:
-    ```bash
-    git clone <repository_url>
-    cd SoulseekDownloader
-    ```
-2.  **Install Dependencies**:
-    Ensure you have Python 3.6+ installed, then run:
-    ```bash
-    pip install -r requirements.txt
-    ```
-3.  **Install `sldl`**: Follow the instructions in the "Prerequisites" section above.
+To install SoulseekDownloader on your macOS computer, open the Terminal application and run the following command. It will automatically detect your architecture and install the correct version of the application.
+
+```bash
+bash <(curl -sL https://raw.githubusercontent.com/felixhj/sk/main/install.sh)
+```
+
+The application will be installed in `~/Applications/SoulseekDownloader`.
 
 ### Running the Application
 
-Execute the main script from your terminal:
+After the installation is complete, you can find the application in the folder mentioned above. You can run it in two ways:
 
-```bash
-python3 soulseek_downloader.py
-```
-
-You can also use the provided shell script, which handles permissions and execution:
-
-```bash
-./run_soulseek_downloader.sh
-```
+1.  **Finder**: Navigate to your Home folder, then to the `Applications` folder, then to `SoulseekDownloader`, and double-click on `SoulseekDownloader.app`.
+2.  **Terminal**:
+    ```bash
+    open ~/Applications/SoulseekDownloader/SoulseekDownloader.app
+    ```
 
 ## Usage
 
-1.  **Launch the App**: Run `python3 soulseek_downloader.py`.
+1.  **Launch the App**: Run the application using one of the methods above.
 2.  **Enter Playlist URL**: Paste the URL of a public or unlisted YouTube playlist.
 3.  **Provide Credentials**: Enter your Soulseek username and password. You can choose to have the password remembered for future sessions (stored unencrypted in a local settings file).
 4.  **Set Download Path**: Select a directory for your downloads. If left empty, files will be saved in the default location used by `sldl`.
