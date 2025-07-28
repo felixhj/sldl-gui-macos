@@ -226,7 +226,10 @@ class AppDelegate(NSObject):
         view.addSubview_(pref_format_label)
         
         self.pref_format_popup = NSPopUpButton.alloc().initWithFrame_(NSMakeRect(80, y, 120, CONTROL_HEIGHT))
-        self.pref_format_popup.addItemsWithTitles_(["Any", "mp3", "flac", "wav", "m4a", "ogg", "wma"])
+        self.pref_format_popup.addItemsWithTitles_([
+            "Any", "mp3", "flac", "wav", "m4a", "aac", "ogg", "opus", 
+            "wma", "ape", "alac", "aiff", "wv", "shn", "tak", "tta"
+        ])
         self.pref_format_popup.selectItemWithTitle_("Any")
         self.pref_format_popup.setAutoresizingMask_(NSViewMinYMargin)
         view.addSubview_(self.pref_format_popup)
@@ -237,7 +240,10 @@ class AppDelegate(NSObject):
         view.addSubview_(strict_format_label)
         
         self.strict_format_popup = NSPopUpButton.alloc().initWithFrame_(NSMakeRect(410, y, 120, CONTROL_HEIGHT))
-        self.strict_format_popup.addItemsWithTitles_(["Any", "mp3", "flac", "wav", "m4a", "ogg", "wma"])
+        self.strict_format_popup.addItemsWithTitles_([
+            "Any", "mp3", "flac", "wav", "m4a", "aac", "ogg", "opus", 
+            "wma", "ape", "alac", "aiff", "wv", "shn", "tak", "tta"
+        ])
         self.strict_format_popup.selectItemWithTitle_("Any")
         self.strict_format_popup.setAutoresizingMask_(NSViewMinYMargin)
         view.addSubview_(self.strict_format_popup)
@@ -397,6 +403,23 @@ sldl will ONLY download files that meet these requirements. Files not matching w
 
 • Format: Only accept this specific format
 • Min/Max Bitrate: Hard minimum/maximum limits
+
+SUPPORTED AUDIO FORMATS:
+• mp3 - MPEG Audio Layer III (most common)
+• flac - Free Lossless Audio Codec (lossless)
+• wav - Waveform Audio File Format (uncompressed)
+• m4a - MPEG-4 Audio (AAC in MP4 container)
+• aac - Advanced Audio Coding
+• ogg - Ogg Vorbis (open source)
+• opus - Modern low-latency codec
+• wma - Windows Media Audio
+• ape - Monkey's Audio (lossless)
+• alac - Apple Lossless Audio Codec
+• aiff - Audio Interchange File Format
+• wv - WavPack (lossless)
+• shn - Shorten (lossless)
+• tak - Tom's lossless Audio Kompressor
+• tta - True Audio (lossless)
 
 EXAMPLES:
 Scenario 1 - High Quality Preferred:
