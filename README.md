@@ -34,14 +34,19 @@ Before using SoulseekDownloader, you need to have the `sldl` command-line tool i
 
 ### Installing sldl
 
-The `sldl` tool is the command-line interface for [slsk-batchdl](https://github.com/fiso64/slsk-batchdl). You can install it as follows:
+The `sldl` tool is the command-line interface for [slsk-batchdl](https://github.com/fiso64/slsk-batchdl). The installer automatically downloads and installs the latest version to your home directory (`~/bin/`) and adds it to your PATH.
+
+If you need to install it manually:
 
 1.  **Download**: Get the latest release from the [slsk-batchdl releases page](https://github.com/fiso64/slsk-batchdl/releases).
 2.  **Extract**: Unzip the downloaded file.
-3.  **Install**: Make the `sldl` binary executable and move it to a directory in your system's PATH, such as `/usr/local/bin/`.
+3.  **Install**: Make the `sldl` binary executable and move it to your home directory.
     ```bash
     chmod +x sldl
-    sudo mv sldl /usr/local/bin/
+    mkdir -p ~/bin
+    mv sldl ~/bin/
+    echo 'export PATH="$HOME/bin:$PATH"' >> ~/.zshrc
+    source ~/.zshrc
     ```
 
 ## Installation
@@ -169,7 +174,7 @@ If you get this error when trying to run SoulseekDownloader:
 1. **Check if sldl is installed:**
 
    ```bash
-   ls -la /usr/local/bin/sldl
+   ls -la ~/bin/sldl
    ```
 
 2. **If not installed, install manually:**
@@ -183,13 +188,14 @@ If you get this error when trying to run SoulseekDownloader:
 
    unzip sldl.zip
    chmod +x sldl
-   sudo mv sldl /usr/local/bin/
+   mkdir -p ~/bin
+   mv sldl ~/bin/
    ```
 
 3. **Add to PATH if needed:**
 
    ```bash
-   echo 'export PATH="/usr/local/bin:$PATH"' >> ~/.zshrc
+   echo 'export PATH="$HOME/bin:$PATH"' >> ~/.zshrc
    source ~/.zshrc
    ```
 
@@ -208,7 +214,7 @@ If you get this error when trying to run SoulseekDownloader:
 - **Python**: 3.9+
 - **OS**: macOS
 - **Dependencies**: `pyobjc-framework-Cocoa`
-- **`sldl`**: Must be installed and available in the system PATH.
+- **`sldl`**: Automatically installed to `~/bin/` by the installer
 
 ## License
 

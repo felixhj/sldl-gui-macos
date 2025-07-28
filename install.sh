@@ -41,7 +41,7 @@ main() {
   fi
   info "Detected architecture: $ARCH"
 
-  # 2. Install slsk-batchdl (sldl) dependency
+  # 2. Install slsk-batchdl (sldl) dependency to user's home directory
   step "Installing slsk-batchdl dependency..."
   
   # Detect architecture for slsk-batchdl
@@ -50,6 +50,11 @@ main() {
   elif [ "$ARCH" = "arm64" ]; then
     SLDL_ARCH="arm64"
   fi
+  
+  # Create user's bin directory
+  USER_BIN_DIR="$HOME/bin"
+  info "Creating user bin directory: $USER_BIN_DIR"
+  mkdir -p "$USER_BIN_DIR"
   
   # Download latest slsk-batchdl release
   info "Downloading latest slsk-batchdl..."
@@ -63,25 +68,26 @@ main() {
   TEMP_SLDL=$(mktemp -u).zip
   curl -fL -o "$TEMP_SLDL" "$SLDL_URL" || fail "Failed to download slsk-batchdl"
   
-  # Extract and install sldl
-  info "Installing sldl to /usr/local/bin..."
+  # Extract and install sldl to user's bin directory
+  info "Installing sldl to $USER_BIN_DIR..."
   unzip -o "$TEMP_SLDL" -d /tmp/
   chmod +x /tmp/sldl
-  sudo mv /tmp/sldl /usr/local/bin/ || fail "Failed to install sldl to /usr/local/bin"
+  mv /tmp/sldl "$USER_BIN_DIR/" || fail "Failed to install sldl to $USER_BIN_DIR"
   rm "$TEMP_SLDL"
   
-  # Verify installation and add to PATH if needed
-  info "Verifying sldl installation..."
-  if ! command -v sldl &> /dev/null; then
-    info "sldl not found in PATH, adding /usr/local/bin to PATH..."
-    echo 'export PATH="/usr/local/bin:$PATH"' >> ~/.zshrc
-    export PATH="/usr/local/bin:$PATH"
-    info "Please restart your terminal or run: source ~/.zshrc"
+  # Add user's bin directory to PATH if not already there
+  info "Adding $USER_BIN_DIR to PATH..."
+  if ! echo "$PATH" | grep -q "$USER_BIN_DIR"; then
+    echo "export PATH=\"$USER_BIN_DIR:\$PATH\"" >> ~/.zshrc
+    export PATH="$USER_BIN_DIR:$PATH"
+    info "Added $USER_BIN_DIR to PATH in ~/.zshrc"
+  else
+    info "$USER_BIN_DIR already in PATH"
   fi
   
   # Test sldl
-  if sldl --version &> /dev/null; then
-    success "slsk-batchdl installed successfully"
+  if "$USER_BIN_DIR/sldl" --version &> /dev/null; then
+    success "slsk-batchdl installed successfully to $USER_BIN_DIR"
   else
     fail "sldl installation verification failed"
   fi
