@@ -50,7 +50,7 @@ jobs:
             --add-binary="sldl_osx-${{ matrix.arch }}/sldl:." \
             --add-data="csv_processor.py:." \
             --icon=icon.icns \
-            --no-codesign \
+            --codesign-identity="-" \
             soulseek_downloader.py
 
       - name: Package the application
