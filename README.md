@@ -4,7 +4,7 @@ A Python GUI application that provides a graphical user interface for batch down
 
 ## Overview
 
-SoulseekDownloader is a cross-platform Python application built with tkinter that simplifies the process of downloading music from Soulseek. It takes a YouTube playlist URL, extracts the song information, and uses the [slsk-batchdl](https://github.com/fiso64/slsk-batchdl) (`sldl`) command-line tool to download the corresponding tracks from Soulseek.
+SoulseekDownloader is a macOS Python application built with **PyObjC** (Cocoa) that simplifies the process of downloading music from Soulseek. It takes a YouTube playlist URL, extracts the song information, and uses the [slsk-batchdl](https://github.com/fiso64/slsk-batchdl) (`sldl`) command-line tool to download the corresponding tracks from Soulseek.
 
 ## Features
 
@@ -15,7 +15,7 @@ SoulseekDownloader is a cross-platform Python application built with tkinter tha
 - **CSV Processing**: Automatically converts numeric error codes to human-readable descriptions
 - **Settings Persistence**: Automatically saves and restores user preferences (credentials, paths, quality settings)
 - **Quality Control**: Flexible preferred settings and strict quality requirements for audio formats and bitrates
-- **Modern UI**: Clean, intuitive interface with modern styling and cross-platform compatibility
+- **Modern UI**: Clean, intuitive interface built with Cocoa and PyObjC
 - **Thread-Safe Operations**: Downloads run in background threads to keep the GUI responsive
 
 ## Prerequisites
@@ -234,7 +234,7 @@ filepath,artist,album,title,length,tracktype,state,failurereason,state_descripti
 
    - This is a known initialization issue that occasionally occurs
    - **Solution**: Restart the application - the GUI queue setup happens during initialization
-   - If persistent, check that you're using Python 3.6+ and tkinter is properly installed
+   - If persistent, check that you're using Python 3.9+ and PyObjC is properly installed
 
 3. **IndentationError in soulseek_downloader.py**:
 
@@ -294,10 +294,10 @@ filepath,artist,album,title,length,tracktype,state,failurereason,state_descripti
 
 ## Requirements
 
-- **Python**: 3.6 or later with tkinter support
-- **Operating System**: Windows, macOS, or Linux
+- **Python**: 3.9 or later with PyObjC support
+- **Operating System**: macOS
 - **sldl**: Command-line tool installed in system PATH
-- **Dependencies**: None (uses only Python standard library)
+- **Dependencies**: `pyobjc-framework-Cocoa`
 
 ## Contributing
 
@@ -313,7 +313,7 @@ This application is for educational and personal use only. Please respect copyri
 
 ## Acknowledgments
 
-- Built with Python and tkinter for cross-platform compatibility
+- Built with Python and PyObjC for a native macOS experience
 - Integrates with the [slsk-batchdl](https://github.com/fiso64/slsk-batchdl) Soulseek downloader tool
 - Uses YouTube playlist parsing for song identification
 - Thanks to [fiso64](https://github.com/fiso64) for creating the excellent `sldl` command-line tool
