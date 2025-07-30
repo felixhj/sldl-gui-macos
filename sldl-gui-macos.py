@@ -6,7 +6,13 @@ import threading
 import json
 import sys
 import re
+import urllib.request
+import urllib.error
+import ssl
 from pathlib import Path
+
+# Application version
+APP_VERSION = "0.3.6"
 
 from csv_processor import SLDLCSVProcessor
 
@@ -32,6 +38,36 @@ except ImportError as e:
 
 SETTINGS_FILE = Path.home() / ".soulseek_downloader_settings.json"
 
+def check_for_updates():
+    """Check for updates by comparing current version with latest GitHub release."""
+    try:
+        # GitHub API endpoint for releases
+        url = "https://api.github.com/repos/felixhj/sldl-gui-macos/releases/latest"
+        
+        # Create request with User-Agent to avoid rate limiting
+        req = urllib.request.Request(url)
+        req.add_header('User-Agent', 'sldl-gui-macos')
+        
+        # Create SSL context that doesn't verify certificates (for macOS compatibility)
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
+        # Fetch latest release info
+        with urllib.request.urlopen(req, timeout=10, context=ssl_context) as response:
+            data = json.loads(response.read().decode())
+            latest_version = data['tag_name'].lstrip('v')  # Remove 'v' prefix if present
+            
+            # Compare versions
+            if latest_version != APP_VERSION:
+                return latest_version
+            return None
+            
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, KeyError, ValueError) as e:
+        # Silently fail on network errors or parsing issues
+        print(f"Update check failed: {e}")
+        return None
+
 class AppDelegate(NSObject):
     
     def applicationDidFinishLaunching_(self, notification):
@@ -42,15 +78,24 @@ class AppDelegate(NSObject):
         if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
             self.sldl_path = Path(sys._MEIPASS) / 'bin' / 'sldl'
         else:
-            self.sldl_path = 'sldl'
+            # Check for local development sldl first
+            local_sldl = Path(__file__).parent / 'dev' / 'bin' / 'sldl'
+            if local_sldl.exists() and local_sldl.is_file():
+                self.sldl_path = str(local_sldl)
+            else:
+                self.sldl_path = 'sldl'
 
         self.setup_menu()
         self.build_ui()
         self.load_settings()
+        
+        # Check for updates in background thread
+        self.check_for_updates_async()
+        
         NSApp.activateIgnoringOtherApps_(True)
 
     def setup_menu(self):
-        """Setup application menu with Edit menu for copy/paste support."""
+        """Setup application menu with Edit menu for copy/paste support and Extra Tools menu."""
         # Create main menu bar
         main_menu = NSMenu.alloc().init()
         
@@ -96,6 +141,20 @@ class AppDelegate(NSObject):
             "Select All", "selectAll:", "a"
         )
         edit_menu.addItem_(select_all_item)
+        
+        # Create Extra Tools menu
+        extra_tools_menu_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Extra Tools", None, ""
+        )
+        main_menu.addItem_(extra_tools_menu_item)
+        extra_tools_menu = NSMenu.alloc().initWithTitle_("Extra Tools")
+        extra_tools_menu_item.setSubmenu_(extra_tools_menu)
+        
+        # Add Output to CSV item
+        output_csv_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Output to .csv", "outputToCSV:", ""
+        )
+        extra_tools_menu.addItem_(output_csv_item)
         
         # Set the main menu
         NSApp.setMainMenu_(main_menu)
@@ -540,12 +599,8 @@ This means: Try to find FLAC files first, but accept MP3 files if they're at lea
         current_step, message = status_info
         self.progress.setDoubleValue_(float(current_step))
 
-        if self.total_steps > 0:
-            status_text = f"Step {int(current_step)} of {self.total_steps} | {message}"
-        else:
-            status_text = message
-            
-        self.status_label.setStringValue_(status_text)
+        # Just show the message directly without step information
+        self.status_label.setStringValue_(message)
 
     def switchToDeterminateProgress_(self, max_value):
         """Switch the progress bar to determinate mode with a max value."""
@@ -554,8 +609,7 @@ This means: Try to find FLAC files first, but accept MP3 files if they're at lea
         self.total_steps = int(float(max_value))
         self.progress.setMaxValue_(float(self.total_steps))
         self.progress.setDoubleValue_(0.0)
-        total_tracks = self.total_steps / 2
-        self.status_label.setStringValue_(f"Found {int(total_tracks)} tracks ({self.total_steps} steps)")
+        self.status_label.setStringValue_(f"Found {self.total_steps} tracks")
 
     def resetProgressIndicator(self):
         """Reset the progress bar to its initial state."""
@@ -768,37 +822,33 @@ This means: Try to find FLAC files first, but accept MP3 files if they're at lea
                 elif line.startswith("Login"):
                     self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", "Logging in...", False)
 
-                # Get total tracks and set the max progress bar value (tracks * 2)
+                # Get total tracks and set the max progress bar value
                 total_match = re.search(r'Downloading (\d+) tracks:', line)
                 if total_match:
                     total_tracks = int(total_match.group(1))
                     if total_tracks > 0:
-                        max_steps = float(total_tracks * 2)
+                        max_steps = float(total_tracks)
                         self.performSelectorOnMainThread_withObject_waitUntilDone_("switchToDeterminateProgress:", max_steps, False)
                     continue
 
-                # --- Count each "Searching" and "Succeeded/Failed" as one step ---
-                step_made = False
-                status_message = ""
-
+                # --- Track successful downloads for progress ---
                 if line.startswith("Searching:"):
                     searching_count += 1
-                    step_made = True
-                    status_message = "Searching..."
+                    # Don't update progress bar during searching phase
+                    continue
                 
                 elif line.startswith("Succeeded:"):
                     succeeded_count += 1
-                    step_made = True
-                    status_message = "Download Succeeded"
+                    # Update progress bar and status with successful downloads
+                    if total_tracks > 0:
+                        current_step = float(succeeded_count)
+                        status_message = f"{succeeded_count}/{total_tracks} downloaded"
+                        self.performSelectorOnMainThread_withObject_waitUntilDone_("updateProgressAndStatus:", (current_step, status_message), False)
+                    continue
 
                 elif line.startswith("All downloads failed:"):
                     failed_count += 1
-                    step_made = True
-                    status_message = "Download Failed"
-                
-                if step_made:
-                    current_step = float(searching_count + succeeded_count + failed_count)
-                    self.performSelectorOnMainThread_withObject_waitUntilDone_("updateProgressAndStatus:", (current_step, status_message), False)
+                    # Don't update progress bar for failed downloads, just count them
                     continue
                 
                 # Get final completion summary from the log
@@ -1003,6 +1053,239 @@ This means: Try to find FLAC files first, but accept MP3 files if they're at lea
             self.performSelectorOnMainThread_withObject_waitUntilDone_(
                 "updateStatusText:", "CSV processing error.", False
             )
+
+    def outputToCSV_(self, sender):
+        """Handle 'Output to .csv' menu item click."""
+        # Get the current playlist URL
+        selected_source = self.source_popup.titleOfSelectedItem()
+        
+        if selected_source == "YouTube Playlist":
+            playlist_url = self.playlist_field.stringValue().strip()
+            if not playlist_url:
+                self.showAlert_message_("Error", "Please enter a YouTube playlist URL.")
+                return
+            # Basic YouTube URL validation
+            if not any(pattern in playlist_url.lower() for pattern in ['youtube.com', 'youtu.be']):
+                self.showAlert_message_("Error", "Please enter a valid YouTube playlist URL.")
+                return
+        else:  # Spotify Playlist
+            playlist_url = self.spotify_field.stringValue().strip()
+            if not playlist_url:
+                self.showAlert_message_("Error", "Please enter a Spotify playlist URL.")
+                return
+            # Basic Spotify URL validation
+            if not any(pattern in playlist_url.lower() for pattern in ['spotify.com', 'open.spotify.com']):
+                self.showAlert_message_("Error", "Please enter a valid Spotify playlist URL.")
+                return
+        
+        # Get target directory
+        download_path_str = self.path_field.stringValue().strip()
+        if not download_path_str:
+            download_path = Path.cwd()
+        else:
+            download_path = Path(download_path_str)
+        
+        if not download_path.is_dir():
+            self.showAlert_message_("Error", f"Target directory '{download_path}' does not exist.")
+            return
+        
+        # Start the CSV export process in a background thread
+        thread = threading.Thread(target=self.__exportPlaylistToCSV, args=(playlist_url, selected_source, download_path), daemon=True)
+        thread.start()
+
+    def __exportPlaylistToCSV(self, playlist_url, source_type, target_directory):
+        """Export playlist to CSV file in background thread."""
+        try:
+            self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                "updateStatusText:", f"Exporting {source_type} to CSV...", False
+            )
+            
+            # Generate filename based on source type and current timestamp
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            if source_type == "YouTube Playlist":
+                filename = f"youtube_playlist_{timestamp}.csv"
+            else:
+                filename = f"spotify_playlist_{timestamp}.csv"
+            
+            csv_path = target_directory / filename
+            
+            # Use sldl for both YouTube and Spotify playlists
+            if source_type == "YouTube Playlist":
+                success = self.__exportYouTubePlaylistToCSV(playlist_url, csv_path)
+            else:
+                # Note: Spotify playlists may require authentication for private playlists
+                success = self.__exportSpotifyPlaylistToCSV(playlist_url, csv_path)
+            
+            if success:
+                self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "updateStatusText:", f"CSV exported to: {csv_path}", False
+                )
+                self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "appendOutput:", f"\n✅ CSV exported successfully to: {csv_path}\n", False
+                )
+            else:
+                self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "updateStatusText:", "CSV export failed", False
+                )
+                self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "appendOutput:", f"\n❌ Failed to export CSV\n", False
+                )
+                
+        except Exception as e:
+            self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                "updateStatusText:", f"CSV export error: {str(e)}", False
+            )
+            self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                "appendOutput:", f"\n❌ CSV export error: {str(e)}\n", False
+            )
+
+    def __exportYouTubePlaylistToCSV(self, playlist_url, csv_path):
+        """Export YouTube playlist to CSV using sldl."""
+        try:
+            # Use sldl to get playlist tracks without downloading
+            cmd = [str(self.sldl_path), playlist_url, '--print', 'tracks']
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            
+            # Parse the output and create CSV
+            import csv
+            tracks = []
+            
+            for line in result.stdout.strip().split('\n'):
+                if line.strip():
+                    # sldl output format: "Artist - Title (duration)"
+                    # Example: "Yes Theory - I Explored A $200,000,000 Forgotten Space Colony (969s)"
+                    if ' - ' in line and '(' in line and ')' in line:
+                        # Extract artist and title
+                        artist_title_part = line.split(' (')[0]
+                        if ' - ' in artist_title_part:
+                            artist, title = artist_title_part.split(' - ', 1)
+                            
+                            # Extract duration (remove 's' suffix and convert to MM:SS)
+                            duration_match = re.search(r'\((\d+)s\)', line)
+                            duration_formatted = ""
+                            if duration_match:
+                                duration_seconds = int(duration_match.group(1))
+                                duration_minutes = duration_seconds // 60
+                                duration_remaining_seconds = duration_seconds % 60
+                                duration_formatted = f"{duration_minutes}:{duration_remaining_seconds:02d}"
+                            
+                            tracks.append({
+                                'title': title.strip(),
+                                'artist': artist.strip(),
+                                'duration': duration_formatted,
+                                'url': playlist_url,  # Use the playlist URL as the source
+                                'uploader': artist.strip()  # Use artist as uploader
+                            })
+            
+            # Write to CSV
+            with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+                fieldnames = ['title', 'artist', 'duration', 'url', 'uploader']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(tracks)
+            
+            return True
+            
+        except subprocess.CalledProcessError as e:
+            error_msg = e.stderr if e.stderr else str(e)
+            self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                "appendOutput:", f"❌ sldl error: {error_msg}\n", False
+            )
+            return False
+        except Exception as e:
+            self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                "appendOutput:", f"❌ YouTube export error: {str(e)}\n", False
+            )
+            return False
+
+    def __exportSpotifyPlaylistToCSV(self, playlist_url, csv_path):
+        """Export Spotify playlist to CSV using sldl."""
+        try:
+            # Use sldl to get playlist tracks without downloading
+            cmd = [str(self.sldl_path), playlist_url, '--print', 'tracks']
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            
+            # Parse the output and create CSV
+            import csv
+            tracks = []
+            
+            for line in result.stdout.strip().split('\n'):
+                if line.strip():
+                    # sldl output format: "Artist - Title" or "Title - Artist"
+                    # We'll parse this as best we can
+                    if ' - ' in line:
+                        parts = line.split(' - ', 1)
+                        if len(parts) == 2:
+                            # Try to determine which is artist and which is title
+                            # This is a simple heuristic - could be improved
+                            artist, title = parts[0].strip(), parts[1].strip()
+                            
+                            # Strip duration from title (e.g., "Song Name (148s)" -> "Song Name")
+                            title_clean = re.sub(r'\s*\(\d+s\)$', '', title)
+                            
+                            tracks.append({
+                                'title': title_clean,
+                                'artist': artist,
+                                'album': '',  # sldl doesn't provide album info in track listing
+                                'duration': '',  # sldl doesn't provide duration in track listing
+                                'url': playlist_url  # Use the playlist URL as the source
+                            })
+            
+            # Write to CSV
+            with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+                fieldnames = ['title', 'artist', 'album', 'duration', 'url']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(tracks)
+            
+            return True
+            
+        except subprocess.CalledProcessError as e:
+            error_msg = e.stderr if e.stderr else str(e)
+            
+            # Check for specific Spotify authentication errors
+            if "not found" in error_msg.lower() and "private" in error_msg.lower():
+                self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "appendOutput:", "❌ Spotify playlist not found or is private. Spotify playlists require authentication.\n", False
+                )
+            elif "invalid_client" in error_msg.lower():
+                self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "appendOutput:", "❌ Spotify authentication failed. The playlist may be private or require valid credentials.\n", False
+                )
+            else:
+                self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "appendOutput:", f"❌ sldl error: {error_msg}\n", False
+                )
+            return False
+        except Exception as e:
+            self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                "appendOutput:", f"❌ Spotify export error: {str(e)}\n", False
+            )
+            return False
+
+    def check_for_updates_async(self):
+        """Check for updates in a background thread to avoid blocking the UI."""
+        def update_check_thread():
+            latest_version = check_for_updates()
+            if latest_version:
+                # Show update alert on main thread
+                self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "showUpdateAlert:", latest_version, False
+                )
+        
+        # Start update check in background thread
+        threading.Thread(target=update_check_thread, daemon=True).start()
+
+    def showUpdateAlert_(self, latest_version):
+        """Show update alert dialog on main thread."""
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_("Update Available")
+        alert.setInformativeText_(f"You are using an old version ({APP_VERSION}). Run the install command again to update to the newest version ({latest_version}).")
+        alert.addButtonWithTitle_("OK")
+        alert.runModal()
 
 
 def main():

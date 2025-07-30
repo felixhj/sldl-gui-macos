@@ -58,6 +58,26 @@ check_architecture() {
     fi
 }
 
+# Get version from user
+get_version() {
+    echo ""
+    echo -e "${BLUE}Version Information${NC}"
+    echo "Please specify the version number for this build."
+    echo "Format: x.y.z (e.g., 0.3.6, 1.0.0, etc.)"
+    echo ""
+    
+    # Read version from user
+    read -p "Enter version number: " VERSION
+    
+    # Validate version format (basic check)
+    if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        log_error "Invalid version format. Please use format: x.y.z"
+        exit 1
+    fi
+    
+    log_info "Building version: $VERSION"
+}
+
 # Install dependencies
 install_dependencies() {
     log_info "Installing Python dependencies..."
@@ -119,6 +139,25 @@ download_slsk_batchdl() {
     log_success "slsk-batchdl downloaded and extracted"
 }
 
+# Update version in application
+update_version() {
+    log_info "Updating version in application..."
+    
+    # Create backup of original file
+    cp sldl-gui-macos.py sldl-gui-macos.py.backup
+    
+    # Update the APP_VERSION constant in the Python file
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS sed
+        sed -i '' "s/APP_VERSION = \".*\"/APP_VERSION = \"$VERSION\"/" sldl-gui-macos.py
+    else
+        # Linux sed
+        sed -i "s/APP_VERSION = \".*\"/APP_VERSION = \"$VERSION\"/" sldl-gui-macos.py
+    fi
+    
+    log_success "Updated APP_VERSION to $VERSION"
+}
+
 # Build the application
 build_application() {
     log_info "Building sldl-gui application..."
@@ -164,13 +203,13 @@ create_dmg() {
         --hide-extension "uninstall.command" \
         --app-drop-link 600 185 \
         --hdiutil-quiet \
-        "sldl-gui-$ARCH-monterey.dmg" \
+        "sldl-gui-$ARCH-monterey-v$VERSION.dmg" \
         "$DMG_TEMP_DIR"
     
     # Clean up temp directory
     rm -rf "$DMG_TEMP_DIR"
     
-    log_success "DMG created: sldl-gui-$ARCH-monterey.dmg"
+    log_success "DMG created: sldl-gui-$ARCH-monterey-v$VERSION.dmg"
 }
 
 # Clean up
@@ -197,6 +236,12 @@ cleanup() {
     # Remove any temporary files
     rm -f sldl.pdb
     
+    # Restore original Python file
+    if [ -f "sldl-gui-macos.py.backup" ]; then
+        mv sldl-gui-macos.py.backup sldl-gui-macos.py
+        log_info "Restored original sldl-gui-macos.py"
+    fi
+    
     log_success "Cleanup complete"
 }
 
@@ -206,17 +251,19 @@ main() {
     
     check_macos_version
     check_architecture
+    get_version
     install_dependencies
     download_slsk_batchdl
+    update_version
     build_application
     create_dmg
     cleanup
     
-    log_success "Build complete! DMG file: sldl-gui-$ARCH-monterey.dmg"
+    log_success "Build complete! DMG file: sldl-gui-$ARCH-monterey-v$VERSION.dmg"
     echo ""
     echo "You can now upload this DMG to your GitHub release."
     echo "To upload to GitHub releases, you can use:"
-    echo "gh release upload <tag> sldl-gui-$ARCH-monterey.dmg"
+    echo "gh release upload v$VERSION sldl-gui-$ARCH-monterey-v$VERSION.dmg"
 }
 
 # Run main function

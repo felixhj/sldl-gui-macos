@@ -187,4 +187,7 @@ logs/
 
 # Temporary files
 *.tmp
-*.temp 
+*.temp
+
+# Development environment
+dev/ 

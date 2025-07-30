@@ -1,3 +1,9 @@
+---
+description: tracking
+globs:
+alwaysApply: true
+---
+
 In every project, and after every significant operation or change, please keep/update two logs:
 
 - a log of the changes made (in .cursor/logs/changes.md)
