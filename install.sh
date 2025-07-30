@@ -2,6 +2,7 @@
 
 # SoulseekDownloader Installer
 # This script downloads and installs the latest version of SoulseekDownloader for macOS.
+# The app now bundles sldl internally, so no separate dependency installation is needed.
 
 # --- Configuration ---
 # Your GitHub repository in "username/repo" format
@@ -41,65 +42,7 @@ main() {
   fi
   info "Detected architecture: $ARCH"
 
-  # 2. Install slsk-batchdl (sldl) dependency to user's home directory
-  step "Installing slsk-batchdl dependency..."
-  
-  # Detect architecture for slsk-batchdl
-  if [ "$ARCH" = "x64" ]; then
-    SLDL_ARCH="x64"
-  elif [ "$ARCH" = "arm64" ]; then
-    SLDL_ARCH="arm64"
-  fi
-  
-  # Create user's hidden bin directory
-  USER_BIN_DIR="$HOME/.bin"
-  info "Creating user bin directory: $USER_BIN_DIR"
-  mkdir -p "$USER_BIN_DIR"
-  
-  # Download latest slsk-batchdl release
-  info "Downloading latest slsk-batchdl..."
-  SLDL_URL=$(curl -s https://api.github.com/repos/fiso64/slsk-batchdl/releases/latest | grep "browser_download_url.*osx-$SLDL_ARCH.zip" | cut -d'"' -f4)
-  
-  if [ -z "$SLDL_URL" ]; then
-    fail "Could not find slsk-batchdl release for $SLDL_ARCH"
-  fi
-  
-  info "Downloading slsk-batchdl from: $SLDL_URL"
-  TEMP_SLDL=$(mktemp -u).zip
-  curl -fL -o "$TEMP_SLDL" "$SLDL_URL" || fail "Failed to download slsk-batchdl"
-  
-  # Extract and install sldl to user's bin directory
-  info "Installing sldl to $USER_BIN_DIR..."
-  unzip -o "$TEMP_SLDL" -d /tmp/
-  chmod +x /tmp/sldl
-  mv /tmp/sldl "$USER_BIN_DIR/" || fail "Failed to install sldl to $USER_BIN_DIR"
-  rm "$TEMP_SLDL"
-  
-  # Remove quarantine attributes to allow execution
-  info "Removing quarantine attributes..."
-  xattr -d com.apple.quarantine "$USER_BIN_DIR/sldl" 2>/dev/null || true
-  
-  # Add user's hidden bin directory to PATH if not already there
-  info "Adding $USER_BIN_DIR to PATH..."
-  if ! echo "$PATH" | grep -q "$USER_BIN_DIR"; then
-    echo "export PATH=\"$USER_BIN_DIR:\$PATH\"" >> ~/.zshrc
-    export PATH="$USER_BIN_DIR:$PATH"
-    info "Added $USER_BIN_DIR to PATH in ~/.zshrc"
-  else
-    info "$USER_BIN_DIR already in PATH"
-  fi
-  
-  # Test sldl installation
-  info "Testing sldl installation..."
-  if "$USER_BIN_DIR/sldl" --version &> /dev/null; then
-    success "slsk-batchdl installed successfully to $USER_BIN_DIR"
-  else
-    info "sldl installed but may need manual approval in System Settings"
-    info "The binary is installed at: $USER_BIN_DIR/sldl"
-    success "slsk-batchdl installed to $USER_BIN_DIR (manual approval may be required)"
-  fi
-
-  # 3. Detect macOS Version and Find the Latest Release Asset
+  # 2. Detect macOS Version and Find the Latest Release Asset
   step "Finding and downloading the latest release..."
   
   # Detect macOS version to choose the right build
@@ -124,7 +67,7 @@ main() {
   
   info "Downloading from: $DOWNLOAD_URL"
 
-  # 4. Download and Mount
+  # 3. Download and Mount
   TEMP_DMG=$(mktemp -u).dmg
   # Use curl with -f to fail fast on 404s and -L to follow redirects
   curl -fL -o "$TEMP_DMG" "$DOWNLOAD_URL" || fail "Download failed. Could not find asset '$ASSET_NAME' in the latest release."
@@ -151,7 +94,6 @@ main() {
   info "Cleaning up..."
   hdiutil detach "$MOUNT_POINT" -quiet
   rm "$TEMP_DMG"
-  rm -f /tmp/sldl  # Clean up any remaining slsk-batchdl files
 
   success "Installation complete!"
   echo ""
@@ -160,6 +102,8 @@ main() {
   echo ""
   echo "To run it, you can double-click the app or use this command:"
   echo "open \"$INSTALL_DIR/SoulseekDownloader.app\""
+  echo ""
+  echo "Note: The app now bundles sldl internally, so no additional dependencies are required."
 }
 
 # Run the main function

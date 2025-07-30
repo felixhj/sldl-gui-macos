@@ -39,10 +39,12 @@ SoulseekDownloader now includes the `sldl` command-line tool bundled with the ap
 To install SoulseekDownloader on your macOS computer, open the Terminal application and run the following command. It will automatically detect your architecture and install the correct version of the application.
 
 ```bash
-bash <(curl -sL https://raw.githubusercontent.com/felixhj/sk/pyobjc-implementation/install.sh)
+bash <(curl -sL https://raw.githubusercontent.com/felixhj/sk/main/install.sh)
 ```
 
 The application will be installed in `~/Applications/SoulseekDownloader`.
+
+The installer automatically detects your system architecture and macOS version, then downloads and installs the appropriate build. Since `sldl` is now bundled with the application, no additional dependencies need to be installed.
 
 ### Build Variants
 
