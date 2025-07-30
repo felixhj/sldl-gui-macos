@@ -108,6 +108,17 @@ jobs:
           elif [ "${{ matrix.os }}" = "macos-14" ]; then
             OS_VERSION="sonoma"
           fi
+
+          # Create a temporary directory for DMG contents
+          DMG_TEMP_DIR=$(mktemp -d)
+
+          # Copy the app to the temp directory
+          cp -R "dist/sldl-gui.app" "$DMG_TEMP_DIR/"
+
+          # Copy the uninstall script to the temp directory
+          cp "uninstall.command" "$DMG_TEMP_DIR/"
+
+          # Create DMG with both app and uninstall script
           create-dmg \
             --volname "sldl-gui Installer" \
             --window-pos 200 120 \
@@ -115,9 +126,14 @@ jobs:
             --icon-size 100 \
             --icon "sldl-gui.app" 200 190 \
             --hide-extension "sldl-gui.app" \
+            --icon "uninstall.command" 400 190 \
+            --hide-extension "uninstall.command" \
             --app-drop-link 600 185 \
             "sldl-gui-${{ matrix.arch }}-$OS_VERSION.dmg" \
-            "dist/sldl-gui.app"
+            "$DMG_TEMP_DIR"
+
+          # Clean up temp directory
+          rm -rf "$DMG_TEMP_DIR"
 
       - name: Create Release and Upload Asset
         uses: softprops/action-gh-release@v1
