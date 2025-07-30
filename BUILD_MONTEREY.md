@@ -1,4 +1,4 @@
-# Building SoulseekDownloader for macOS 12 (Monterey)
+# Building SLDL GUI for macOS for macOS 12 (Monterey)
 
 Since GitHub Actions no longer supports macOS 12 runners, the Monterey build needs to be created locally. This guide will walk you through the process.
 

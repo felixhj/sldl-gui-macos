@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SoulseekDownloader - PyObjC GUI version."""
+"""SLDL GUI for macOS - PyObjC GUI version."""
 
 import subprocess
 import threading

@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# SoulseekDownloader Installer
-# This script downloads and installs the latest version of SoulseekDownloader for macOS.
+# SLDL GUI for macOS Installer
+# This script downloads and installs the latest version of SLDL GUI for macOS.
 # The app now bundles sldl internally, so no separate dependency installation is needed.
 
 # --- Configuration ---
 # Your GitHub repository in "username/repo" format
-GITHUB_REPO="felixhj/sk"
+GITHUB_REPO="felixhj/sldl-gui-macos"
 
 # --- Style Functions ---
 step() {
@@ -28,7 +28,7 @@ fail() {
 
 # --- Main Script ---
 main() {
-  step "Starting SoulseekDownloader Installer"
+  step "Starting SLDL GUI for macOS Installer"
 
   # 1. Detect Architecture
   info "Detecting system architecture..."

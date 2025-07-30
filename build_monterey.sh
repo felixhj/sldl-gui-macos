@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# SoulseekDownloader Monterey Local Build Script
+# SLDL GUI for macOS Monterey Local Build Script
 # This script builds the app locally on macOS 12 (Monterey) for distribution
 
 set -e  # Exit on any error
