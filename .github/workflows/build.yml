@@ -1,0 +1,151 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*' # Trigger on tags like v1.0.0
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build on ${{ matrix.os }} (${{ matrix.arch }})
+    strategy:
+      matrix:
+        include:
+          - os: macos-13 # Ventura for x86_64
+            arch: x64
+            python-version: '3.9'
+          - os: macos-14 # Sonoma for arm64 (Apple Silicon)
+            arch: arm64
+            python-version: '3.9'
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: ${{ matrix.arch }}
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Download and Extract slsk-batchdl
+        run: |
+          # Get latest release URL for the correct architecture
+          RELEASE_URL=$(curl -s https://api.github.com/repos/fiso64/slsk-batchdl/releases/latest | grep "browser_download_url.*sldl_osx-${{ matrix.arch }}.zip" | cut -d'"' -f4)
+
+          if [ -z "$RELEASE_URL" ]; then
+            echo "::error::Could not find slsk-batchdl release for ${{ matrix.arch }}"
+            exit 1
+          fi
+
+          echo "Downloading from: $RELEASE_URL"
+          curl -L -o "sldl_osx-${{ matrix.arch }}.zip" "$RELEASE_URL"
+
+          # Extract and organize
+          unzip -o "sldl_osx-${{ matrix.arch }}.zip"
+          mkdir -p bin
+          mv sldl bin/
+          chmod +x bin/sldl
+
+          # Verify the binary
+          ls -la bin/
+          bin/sldl --version
+
+      - name: Import Signing Certificate
+        env:
+          SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          # Decode the certificate
+          printf "%s" "${{ secrets.SIGNING_CERTIFICATE_P12 }}" | base64 --decode > certificate.p12
+
+          # Verify the certificate and password
+          echo "Verifying certificate with OpenSSL..."
+          openssl pkcs12 -in certificate.p12 -noout -passin env:SIGNING_CERTIFICATE_PASSWORD
+          if [ $? -ne 0 ]; then
+            echo "::error::OpenSSL failed to verify the certificate with the provided password."
+            exit 1
+          fi
+          echo "Certificate verified successfully."
+
+          # Create and prepare the keychain
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+
+          # Import the certificate into the keychain
+          security import certificate.p12 -k build.keychain -P "$SIGNING_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+
+          # Allow codesign to access the keychain
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
+
+      - name: Build the application with PyInstaller
+        run: |
+          pyinstaller --noconfirm --windowed --name="sldl-gui" \
+            --add-binary="bin/sldl:bin" \
+            --add-data="csv_processor.py:." \
+            --icon=icon.icns \
+            --osx-entitlements-file="entitlements.plist" \
+            --codesign-identity="sldl-gui-developer" \
+            sldl-gui-macos.py
+
+      - name: Create DMG
+        run: |
+          brew install create-dmg
+          # Determine macOS version for naming
+          if [ "${{ matrix.os }}" = "macos-13" ]; then
+            OS_VERSION="ventura"
+          elif [ "${{ matrix.os }}" = "macos-14" ]; then
+            OS_VERSION="sonoma"
+          fi
+
+          # Create a temporary directory for DMG contents
+          DMG_TEMP_DIR=$(mktemp -d)
+
+          # Copy the app to the temp directory
+          cp -R "dist/sldl-gui.app" "$DMG_TEMP_DIR/"
+
+          # Copy the uninstall script to the temp directory
+          cp "uninstall.command" "$DMG_TEMP_DIR/"
+
+          # Create DMG with both app and uninstall script
+          create-dmg \
+            --volname "sldl-gui Installer" \
+            --window-pos 200 120 \
+            --window-size 800 400 \
+            --icon-size 100 \
+            --icon "sldl-gui.app" 200 190 \
+            --hide-extension "sldl-gui.app" \
+            --icon "uninstall.command" 400 190 \
+            --hide-extension "uninstall.command" \
+            --app-drop-link 600 185 \
+            "sldl-gui-${{ matrix.arch }}-$OS_VERSION.dmg" \
+            "$DMG_TEMP_DIR"
+
+          # Clean up temp directory
+          rm -rf "$DMG_TEMP_DIR"
+
+      - name: Create Release and Upload Asset
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: '*.dmg'
+          draft: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clean up keychain
+        if: always()
+        run: |
+          security delete-keychain build.keychain
+          rm -f certificate.p12
