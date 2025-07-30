@@ -42,7 +42,7 @@ jobs:
       - name: Download and Extract slsk-batchdl
         run: |
           # Get latest release URL for the correct architecture
-          RELEASE_URL=$(curl -s https://api.github.com/repos/fiso64/slsk-batchdl/releases/latest | grep "browser_download_url.*osx-${{ matrix.arch }}.zip" | cut -d'"' -f4)
+          RELEASE_URL=$(curl -s https://api.github.com/repos/fiso64/slsk-batchdl/releases/latest | grep "browser_download_url.*sldl_osx-${{ matrix.arch }}.zip" | cut -d'"' -f4)
 
           if [ -z "$RELEASE_URL" ]; then
             echo "::error::Could not find slsk-batchdl release for ${{ matrix.arch }}"

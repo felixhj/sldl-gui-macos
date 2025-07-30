@@ -21,7 +21,19 @@ The GitHub Actions workflow has been updated to properly bundle the `sldl` depen
 - Uses `--add-binary="bin/sldl:bin"` in PyInstaller
 - Matches the expected path in code: `Path(sys._MEIPASS) / 'bin' / 'sldl'`
 
-### 2. Improved Error Handling
+### 2. Fixed sldl File Naming Pattern
+
+**Issue Found:**
+
+- The workflow was looking for `osx-${{ matrix.arch }}.zip`
+- Actual release files are named `sldl_osx-${{ matrix.arch }}.zip`
+
+**Fix Applied:**
+
+- Updated grep pattern to `sldl_osx-${{ matrix.arch }}.zip`
+- This matches the actual release assets from slsk-batchdl
+
+### 3. Improved Error Handling
 
 - Added validation to ensure the correct architecture binary is found
 - Added verification that sldl binary is executable and working
@@ -97,3 +109,24 @@ The GitHub Actions workflow now matches the Monterey build script approach:
 | Code Path     | `Path(sys._MEIPASS) / 'bin' / 'sldl'` | `Path(sys._MEIPASS) / 'bin' / 'sldl'` |
 
 This ensures consistency between local and automated builds.
+
+## Troubleshooting
+
+### Common Issues
+
+1. **sldl Download Fails**
+
+   - **Cause**: Incorrect file naming pattern in grep
+   - **Solution**: Use `sldl_osx-${{ matrix.arch }}.zip` pattern
+   - **Status**: ✅ Fixed
+
+2. **Build Cancellation**
+
+   - **Cause**: Timeout or manual cancellation
+   - **Solution**: Monitor build progress and ensure sufficient time
+   - **Status**: ⚠️ Monitor
+
+3. **Architecture Mismatch**
+   - **Cause**: Wrong sldl binary for target architecture
+   - **Solution**: Ensure correct `matrix.arch` mapping
+   - **Status**: ✅ Working correctly
