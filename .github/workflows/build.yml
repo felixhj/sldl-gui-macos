@@ -40,17 +40,27 @@ jobs:
           pip install pyinstaller
 
       - name: Download and Extract slsk-batchdl
-        uses: robinraju/release-downloader@v1.9
-        with:
-          repository: 'fiso64/slsk-batchdl'
-          latest: true
-          fileName: 'sldl_osx-${{ matrix.arch }}.zip'
-          extract: true
-
-      - name: Verify extracted files and set permissions
         run: |
-          ls -l
-          chmod +x sldl
+          # Get latest release URL for the correct architecture
+          RELEASE_URL=$(curl -s https://api.github.com/repos/fiso64/slsk-batchdl/releases/latest | grep "browser_download_url.*osx-${{ matrix.arch }}.zip" | cut -d'"' -f4)
+
+          if [ -z "$RELEASE_URL" ]; then
+            echo "::error::Could not find slsk-batchdl release for ${{ matrix.arch }}"
+            exit 1
+          fi
+
+          echo "Downloading from: $RELEASE_URL"
+          curl -L -o "sldl_osx-${{ matrix.arch }}.zip" "$RELEASE_URL"
+
+          # Extract and organize
+          unzip -o "sldl_osx-${{ matrix.arch }}.zip"
+          mkdir -p bin
+          mv sldl bin/
+          chmod +x bin/sldl
+
+          # Verify the binary
+          ls -la bin/
+          bin/sldl --version
 
       - name: Import Signing Certificate
         env:
@@ -82,7 +92,7 @@ jobs:
       - name: Build the application with PyInstaller
         run: |
           pyinstaller --noconfirm --windowed --name="SoulseekDownloader" \
-            --add-binary="sldl:." \
+            --add-binary="bin/sldl:bin" \
             --add-data="csv_processor.py:." \
             --icon=icon.icns \
             --osx-entitlements-file="entitlements.plist" \

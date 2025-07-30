@@ -13,15 +13,17 @@ After the download process is complete, the application automatically finds the 
 - **YouTube Playlist Integration**: Enter a YouTube playlist URL to automatically extract song information.
 - **Soulseek Authentication**: Securely log in with your Soulseek username and password.
 - **Custom Download Path**: Specify where you want to save your downloaded music.
-- **Real-time Output**: View download progress and status updates in real-time.
+- **Listen Port Configuration**: Set a custom listening port to avoid conflicts with other Soulseek clients.
+- **Real-time Progress Tracking**: View download progress with accurate step counting and status updates.
 - **Automated CSV Processing**: Automatically processes the `_index.csv` file post-download:
   - Converts numeric status codes to human-readable descriptions.
   - Saves the cleaned data to `log.csv`.
   - Deletes the original `_index.csv` file.
-- **Settings Persistence**: Automatically saves and restores user preferences (credentials, paths, quality settings).
+- **Settings Persistence**: Automatically saves and restores user preferences (credentials, paths, quality settings, listen port).
 - **Quality Control**: Set preferred and strict requirements for audio format and bitrate.
 - **Modern UI**: Clean, intuitive interface built with native Cocoa and PyObjC.
 - **Thread-Safe Operations**: Downloads run in a background thread to keep the GUI responsive.
+- **Self-Contained**: Includes the `sldl` dependency bundled with the application.
 
 ## System Requirements
 
@@ -30,24 +32,7 @@ After the download process is complete, the application automatically finds the 
 
 ## Prerequisites
 
-Before using SoulseekDownloader, you need to have the `sldl` command-line tool installed on your system. The application expects `sldl` to be available in your system's PATH.
-
-### Installing sldl
-
-The `sldl` tool is the command-line interface for [slsk-batchdl](https://github.com/fiso64/slsk-batchdl). The installer automatically downloads and installs the latest version to your home directory (`~/.bin/`) and adds it to your PATH.
-
-If you need to install it manually:
-
-1.  **Download**: Get the latest release from the [slsk-batchdl releases page](https://github.com/fiso64/slsk-batchdl/releases).
-2.  **Extract**: Unzip the downloaded file.
-3.  **Install**: Make the `sldl` binary executable and move it to your hidden bin directory.
-    ```bash
-    chmod +x sldl
-    mkdir -p ~/.bin
-    mv sldl ~/.bin/
-    echo 'export PATH="$HOME/.bin:$PATH"' >> ~/.zshrc
-    source ~/.zshrc
-    ```
+SoulseekDownloader now includes the `sldl` command-line tool bundled with the application, so no separate installation is required. The application automatically downloads and bundles the latest version of `sldl` during the build process.
 
 ## Installation
 
@@ -86,17 +71,28 @@ After the installation is complete, you can find the application in the folder m
 1.  **Launch the App**: Run the application using one of the methods above.
 2.  **Enter Playlist URL**: Paste the URL of a public or unlisted YouTube playlist.
 3.  **Provide Credentials**: Enter your Soulseek username and password. You can choose to have the password remembered for future sessions (stored unencrypted in a local settings file).
-4.  **Set Download Path**: Select a directory for your downloads. If left empty, files will be saved in the default location used by `sldl`.
-5.  **Configure Audio Quality**:
+4.  **Set Listen Port (Optional)**: If you experience port conflicts with other Soulseek clients, specify a custom listening port. Leave empty to use the default (49998).
+5.  **Set Download Path**: Select a directory for your downloads. If left empty, files will be saved in the default location used by `sldl`.
+6.  **Configure Audio Quality**:
     - **Preferred**: `sldl` will prioritize files matching these criteria but will accept other files if no match is found.
     - **Strict**: `sldl` will only download files that meet these exact criteria.
-6.  **Start Download**: Click the "Start Download" button.
-7.  **Monitor Progress**: Track the download status in the main window.
-8.  **Check the Log**: Once complete, a `log.csv` file will be created in the download directory with detailed results. The original `_index.csv` is removed automatically.
+7.  **Start Download**: Click the "Start Download" button.
+8.  **Monitor Progress**: Track the download status with accurate step counting in the main window.
+9.  **Check the Log**: Once complete, a `log.csv` file will be created in the download directory with detailed results. The original `_index.csv` is removed automatically.
+
+### Listen Port Configuration
+
+If you encounter port conflicts (e.g., "Failed to start listening on 0.0.0.0:49998"), you can specify a custom listening port:
+
+- **Default Port**: 49998 (used if no custom port is specified)
+- **Recommended Range**: 1024-65535 (avoid ports already in use by other applications)
+- **Common Alternatives**: 2234-2242 (traditional Soulseek range), 50000+ (high range to avoid conflicts)
+
+The application will remember your preferred port for future sessions.
 
 ### Using the CSV Processor Standalone
 
-The CSV processor script can be run independently to process `_index.csv` files from `sldl`. It renames the output to `log.csv` and deletes the original file.
+The CSV processor functionality is now integrated into the main application, but you can still run it independently if needed:
 
 ```bash
 # Process a single CSV file
@@ -111,6 +107,7 @@ The application saves your settings to `~/.soulseek_downloader_settings.json`. T
 
 - Soulseek username and password (password is only saved if "Remember Password" is checked).
 - Download path.
+- Listen port preference.
 - Audio quality preferences.
 
 **Security Note**: The password is saved in plain text. Only use the "Remember Password" feature on a secure, personal computer.
@@ -120,31 +117,33 @@ The application saves your settings to `~/.soulseek_downloader_settings.json`. T
 ```
 SoulseekDownloader/
 ├── soulseek_downloader.py    # Main PyObjC GUI application
-├── csv_processor.py          # Standalone script to process _index.csv into log.csv
-├── run_soulseek_downloader.sh # Launcher script
+├── csv_processor.py          # CSV processing module (integrated)
+├── build_monterey.sh         # Build script for Monterey
 ├── requirements.txt          # Python dependencies
+├── entitlements.plist        # macOS entitlements for signing
+├── icon.icns                 # Application icon
 └── README.md                 # This documentation file
 ```
 
 ### Key Components
 
 - **`soulseek_downloader.py`**: The core application logic, GUI, and download management.
-- **`csv_processor.py`**: A utility script that runs after downloads to clean up the CSV log file. It converts numeric codes to readable text, renames the file to `log.csv`, and removes the original.
-- **`run_soulseek_downloader.sh`**: A simple shell script to launch the application.
+- **`csv_processor.py`**: A module that processes CSV log files to add human-readable descriptions.
+- **`build_monterey.sh`**: Automated build script that downloads dependencies and creates the application bundle.
 
 ## Technical Details
 
 The application operates as follows:
 
 1.  It gathers user input from the GUI.
-2.  It constructs and executes a command for the `sldl` tool in a background thread.
-3.  It captures and displays the real-time output from `sldl` in the GUI.
+2.  It constructs and executes a command for the bundled `sldl` tool in a background thread.
+3.  It captures and displays the real-time output from `sldl` in the GUI with accurate progress tracking.
 4.  After the `sldl` process finishes, it locates the most recent `_index.csv` in the download directory.
-5.  It runs `csv_processor.py` to process this file, which creates `log.csv` and deletes the source `_index.csv`.
+5.  It processes this file using the integrated CSV processor, which creates `log.csv` and deletes the source `_index.csv`.
 
 ### CSV Processing
 
-The `sldl` tool generates an `_index.csv` file with numeric codes for download status. `csv_processor.py` adds two new columns, `state_description` and `failure_description`, with human-readable text.
+The `sldl` tool generates an `_index.csv` file with numeric codes for download status. The integrated CSV processor adds two new columns, `state_description` and `failure_description`, with human-readable text.
 
 **State Codes:**
 
@@ -167,81 +166,30 @@ The final `log.csv` will contain these descriptive columns, providing a clear su
 
 ## Troubleshooting
 
-### "sldl command not found" Error
+### Port Conflicts
 
-If you get this error when trying to run SoulseekDownloader:
+If you encounter "Failed to start listening" errors:
 
-1. **Check if sldl is installed:**
+1. **Try a different port**: Use the "Listen Port" field to specify an alternative port (e.g., 2234, 50000, 60000).
+2. **Check for other Soulseek clients**: Ensure no other Soulseek applications are running.
+3. **Restart the application**: Sometimes a restart can resolve port conflicts.
 
-   ```bash
-   ls -la ~/.bin/sldl
-   ```
+### Authentication Failures
 
-2. **If not installed, install manually:**
-
-   ```bash
-   # For Apple Silicon (M1/M2) Macs:
-   curl -L -o sldl.zip "https://github.com/fiso64/slsk-batchdl/releases/latest/download/sldl_osx-arm64.zip"
-
-   # For Intel Macs:
-   curl -L -o sldl.zip "https://github.com/fiso64/slsk-batchdl/releases/latest/download/sldl_osx-x64.zip"
-
-   unzip sldl.zip
-   chmod +x sldl
-   mkdir -p ~/.bin
-   mv sldl ~/.bin/
-   ```
-
-3. **Add to PATH if needed:**
-
-   ```bash
-   echo 'export PATH="$HOME/.bin:$PATH"' >> ~/.zshrc
-   source ~/.zshrc
-   ```
-
-4. **Verify installation:**
-   ```bash
-   sldl --version
-   ```
-
-### macOS Security Restrictions
-
-If you get a "Killed: 9" error or "sldl installation verification failed":
-
-1. **Check if sldl is installed:**
-
-   ```bash
-   ls -la ~/.bin/sldl
-   ```
-
-2. **Remove quarantine attributes (if needed):**
-
-   ```bash
-   xattr -d com.apple.quarantine ~/.bin/sldl
-   ```
-
-3. **Allow in System Settings (if needed):**
-
-   - Go to **System Settings > Privacy & Security > Developer Tools**
-   - Add `~/.bin/sldl` to the allowed applications list
-
-4. **Alternative: Run from terminal first:**
-   ```bash
-   ~/.bin/sldl --version
-   ```
-   This may trigger a security dialog that you can approve.
+- **Double-check credentials**: Verify your Soulseek username and password.
+- **Check Soulseek status**: Ensure the Soulseek network is accessible.
 
 ### Other Issues
 
-- **Authentication Failures**: Double-check your Soulseek credentials.
-- **CSV Processing Fails**: Ensure the download directory is writable, as the script needs to create `log.csv` and delete the original `_index.csv`.
+- **CSV Processing Fails**: Ensure the download directory is writable, as the application needs to create `log.csv` and delete the original `_index.csv`.
+- **Application won't start**: Check that you're running macOS 12.0 or later.
 
 ## Requirements
 
 - **Python**: 3.9+
-- **OS**: macOS
-- **Dependencies**: `pyobjc-framework-Cocoa`
-- **`sldl`**: Automatically installed to `~/.bin/` by the installer
+- **OS**: macOS 12.0 (Monterey) or later
+- **Dependencies**: `pyobjc-framework-Cocoa` (automatically handled by build script)
+- **`sldl`**: Automatically bundled with the application
 
 ## License
 

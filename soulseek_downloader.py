@@ -8,6 +8,8 @@ import sys
 import re
 from pathlib import Path
 
+from csv_processor import SLDLCSVProcessor
+
 try:
     import objc
     from Cocoa import (
@@ -33,6 +35,11 @@ SETTINGS_FILE = Path.home() / ".soulseek_downloader_settings.json"
 class AppDelegate(NSObject):
     
     def applicationDidFinishLaunching_(self, notification):
+        if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+            self.sldl_path = Path(sys._MEIPASS) / 'bin' / 'sldl'
+        else:
+            self.sldl_path = 'sldl'
+
         self.setup_menu()
         self.build_ui()
         self.load_settings()
@@ -170,6 +177,20 @@ class AppDelegate(NSObject):
         self.remember_password_checkbox.setState_(False)
         self.remember_password_checkbox.setAutoresizingMask_(NSViewMinYMargin)
         view.addSubview_(self.remember_password_checkbox)
+
+        # Listen Port
+        y -= FIELD_Y_SPACING
+        self.port_label = NSTextField.labelWithString_("Listen Port (optional):")
+        self.port_label.setFrame_(NSMakeRect(PADDING, y, LABEL_WIDTH, CONTROL_HEIGHT))
+        self.port_label.setAutoresizingMask_(NSViewMinYMargin)
+        view.addSubview_(self.port_label)
+        self.port_field = NSTextField.alloc().initWithFrame_(NSMakeRect(playlist_field_x, y, 100, CONTROL_HEIGHT))
+        self.port_field.setBezelStyle_(NSTextFieldRoundedBezel)
+        self.port_field.setPlaceholderString_("49998")
+        self.port_field.setEditable_(True)
+        self.port_field.setSelectable_(True)
+        self.port_field.setAutoresizingMask_(NSViewMinYMargin)
+        view.addSubview_(self.port_field)
 
         # Download Path
         y -= FIELD_Y_SPACING
@@ -464,18 +485,27 @@ Only enable this on your personal, secure computer."""
         if length > 0:
             self.output_view.scrollRangeToVisible_((length, 0))
 
-    def updateProgress_(self, value):
-        """Safely update progress bar on the main thread."""
-        self.progress.setDoubleValue_(float(value))
+    def updateProgressAndStatus_(self, status_info):
+        """Safely update progress bar and status label on the main thread."""
+        current_step, message = status_info
+        self.progress.setDoubleValue_(float(current_step))
+
+        if self.total_steps > 0:
+            status_text = f"Step {int(current_step)} of {self.total_steps} | {message}"
+        else:
+            status_text = message
+            
+        self.status_label.setStringValue_(status_text)
 
     def switchToDeterminateProgress_(self, max_value):
         """Switch the progress bar to determinate mode with a max value."""
         self.progress.stopAnimation_(None)
         self.progress.setIndeterminate_(False)
-        self.progress.setMaxValue_(float(max_value))
+        self.total_steps = int(float(max_value))
+        self.progress.setMaxValue_(float(self.total_steps))
         self.progress.setDoubleValue_(0.0)
-        total_tracks = int(float(max_value) / 2)
-        self.status_label.setStringValue_(f"Found {total_tracks} tracks ({int(max_value)} steps)")
+        total_tracks = self.total_steps / 2
+        self.status_label.setStringValue_(f"Found {int(total_tracks)} tracks ({self.total_steps} steps)")
 
     def resetProgressIndicator(self):
         """Reset the progress bar to its initial state."""
@@ -525,7 +555,7 @@ Only enable this on your personal, secure computer."""
 
         # Check if sldl is available
         try:
-            subprocess.run(['sldl', '--version'], capture_output=True, check=True)
+            subprocess.run([str(self.sldl_path), '--version'], capture_output=True, check=True)
         except (subprocess.CalledProcessError, FileNotFoundError):
             self.showAlert_message_("Error", "sldl command not found. Please install slsk-batchdl first.")
             return
@@ -533,6 +563,7 @@ Only enable this on your personal, secure computer."""
         # Disable the start button and reset progress
         self.start_button.setEnabled_(False)
         self.output_view.setString_("")
+        self.total_steps = 0
         
         # Start indeterminate progress immediately
         self.progress.setIndeterminate_(True)
@@ -552,9 +583,13 @@ Only enable this on your personal, secure computer."""
             path = self.path_field.stringValue().strip()
 
             # Build base command
-            cmd = ['sldl', playlist_url, '--user', username, '--pass', password]
+            cmd = [str(self.sldl_path), playlist_url, '--user', username, '--pass', password]
             if path:
                 cmd.extend(['--path', path])
+
+            port = self.port_field.stringValue().strip()
+            if port and port.isdigit():
+                cmd.extend(['--listen-port', port])
 
             # Add format/quality parameters
             # Preferred parameters
@@ -629,27 +664,26 @@ Only enable this on your personal, secure computer."""
 
                 # --- Count each "Searching" and "Succeeded/Failed" as one step ---
                 step_made = False
-                status_text = ""
+                status_message = ""
 
                 if line.startswith("Searching:"):
                     searching_count += 1
                     step_made = True
-                    status_text = f"Step {searching_count + succeeded_count + failed_count} of {total_tracks * 2} | Searching..."
+                    status_message = "Searching..."
                 
                 elif line.startswith("Succeeded:"):
                     succeeded_count += 1
                     step_made = True
-                    status_text = f"Step {searching_count + succeeded_count + failed_count} of {total_tracks * 2} | Download Succeeded"
+                    status_message = "Download Succeeded"
 
                 elif line.startswith("All downloads failed:"):
                     failed_count += 1
                     step_made = True
-                    status_text = f"Step {searching_count + succeeded_count + failed_count} of {total_tracks * 2} | Download Failed"
+                    status_message = "Download Failed"
                 
                 if step_made:
                     current_step = float(searching_count + succeeded_count + failed_count)
-                    self.performSelectorOnMainThread_withObject_waitUntilDone_("updateProgress:", current_step, False)
-                    self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", status_text, False)
+                    self.performSelectorOnMainThread_withObject_waitUntilDone_("updateProgressAndStatus:", (current_step, status_message), False)
                     continue
                 
                 # Get final completion summary from the log
@@ -722,6 +756,9 @@ Only enable this on your personal, secure computer."""
                 if remember_password:
                     self.pass_field.setStringValue_(data.get('password', ''))
                 
+                # Load port
+                self.port_field.setStringValue_(data.get('listen_port', ''))
+
                 # Load format/quality settings
                 if 'pref_format' in data:
                     self.pref_format_popup.selectItemWithTitle_(data['pref_format'])
@@ -751,6 +788,7 @@ Only enable this on your personal, secure computer."""
             'username': self.user_field.stringValue(),
             'download_path': self.path_field.stringValue(),
             'remember_password': remember_password,
+            'listen_port': self.port_field.stringValue(),
             'pref_format': self.pref_format_popup.titleOfSelectedItem(),
             'strict_format': self.strict_format_popup.titleOfSelectedItem(),
             'pref_min_bitrate': self.pref_min_bitrate_field.stringValue(),
@@ -784,15 +822,14 @@ Only enable this on your personal, secure computer."""
                 download_path = Path.cwd()
             else:
                 download_path = Path(download_path_str)
-            
+
             if not download_path.is_dir():
-                # Silently log and return if dir not found
                 print(f"CSV processor: Download directory '{download_path}' not found.")
                 return
 
             latest_csv = None
             latest_mtime = 0
-            
+
             for csv_file in download_path.rglob('_index.csv'):
                 try:
                     mtime = csv_file.stat().st_mtime
@@ -807,31 +844,11 @@ Only enable this on your personal, secure computer."""
                     "updateStatusText:", "CSV to process not found", False
                 )
                 return
-            
-            processor_script = Path(__file__).parent / "csv_processor.py"
-            if not processor_script.exists():
-                print(f"Error: csv_processor.py not found at {processor_script}")
-                self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                    "updateStatusText:", "CSV processor script not found", False
-                )
-                return
-                 
-            cmd = [sys.executable, str(processor_script), str(latest_csv)]
-            
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=False
-            )
-            
-            # Log output to console instead of GUI
-            if result.stdout:
-                print("CSV Processor (stdout):\n", result.stdout)
-            if result.stderr:
-                print("CSV Processor (stderr):\n", result.stderr)
-            
-            if result.returncode == 0:
+
+            processor = SLDLCSVProcessor()
+            success = processor.process_csv_file(str(latest_csv))
+
+            if success:
                 self.performSelectorOnMainThread_withObject_waitUntilDone_(
                     "updateStatusText:", "CSV processing complete.", False
                 )

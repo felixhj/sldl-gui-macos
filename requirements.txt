@@ -2,12 +2,8 @@
 # Requires PyObjC for the Cocoa GUI implementation
 
 # Core PyObjC frameworks for macOS GUI
-pyobjc-framework-Cocoa>=10.0
-pyobjc-core>=10.0
+pyobjc-framework-Cocoa>=9.0
+pyobjc-core>=9.0
 
-# Optional: Additional PyObjC frameworks that might be useful
-# pyobjc-framework-Quartz>=10.0
-
-# Note: This application also requires the 'sldl' command-line tool from
-# the slsk-batchdl project to be installed separately.
-# See README.md for installation instructions.
+# Note: The 'sldl' command-line tool from slsk-batchdl is automatically
+# bundled with this application during the build process.

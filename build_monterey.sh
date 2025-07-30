@@ -82,15 +82,14 @@ install_dependencies() {
     # Create virtual environment
     log_info "Creating virtual environment..."
     $PYTHON_CMD -m venv venv_monterey
-    source venv_monterey/bin/activate
     
     # Upgrade pip
-    pip install --upgrade pip
+    ./venv_monterey/bin/pip install --upgrade pip
     
     # Install requirements
     log_info "Installing Python packages..."
-    pip install -r requirements.txt
-    pip install pyinstaller
+    ./venv_monterey/bin/pip install -r requirements.txt
+    ./venv_monterey/bin/pip install pyinstaller
     
     log_success "Dependencies installed"
 }
@@ -113,7 +112,9 @@ download_slsk_batchdl() {
     # Extract
     log_info "Extracting slsk-batchdl..."
     unzip -o "sldl_osx-$ARCH.zip"
-    chmod +x sldl
+    mkdir -p bin
+    mv sldl bin/
+    chmod +x bin/sldl
     
     log_success "slsk-batchdl downloaded and extracted"
 }
@@ -122,13 +123,9 @@ download_slsk_batchdl() {
 build_application() {
     log_info "Building SoulseekDownloader application..."
     
-    # Activate virtual environment
-    source venv_monterey/bin/activate
-    
     # Build with PyInstaller
-    pyinstaller --noconfirm --windowed --name="SoulseekDownloader" \
-        --add-binary="sldl:." \
-        --add-data="csv_processor.py:." \
+    ./venv_monterey/bin/pyinstaller --noconfirm --windowed --name="SoulseekDownloader" \
+        --add-binary="bin/sldl:bin" \
         --icon=icon.icns \
         --osx-entitlements-file="entitlements.plist" \
         soulseek_downloader.py
@@ -155,6 +152,7 @@ create_dmg() {
         --icon "SoulseekDownloader.app" 200 190 \
         --hide-extension "SoulseekDownloader.app" \
         --app-drop-link 600 185 \
+        --hdiutil-quiet \
         "SoulseekDownloader-$ARCH-monterey.dmg" \
         "dist/SoulseekDownloader.app"
     
@@ -169,7 +167,7 @@ cleanup() {
     rm -rf build/
     rm -rf dist/SoulseekDownloader/
     rm -f "sldl_osx-$ARCH.zip"
-    rm -f sldl
+    rm -rf bin
     
     # Remove virtual environment
     rm -rf venv_monterey/
