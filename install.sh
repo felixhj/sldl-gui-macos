@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# SLDL GUI for macOS Installer
-# This script downloads and installs the latest version of SLDL GUI for macOS.
+# sldl-gui for macOS Installer
+# This script downloads and installs the latest version of sldl-gui for macOS.
 # The app now bundles sldl internally, so no separate dependency installation is needed.
 
 # --- Configuration ---
@@ -28,7 +28,7 @@ fail() {
 
 # --- Main Script ---
 main() {
-  step "Starting SLDL GUI for macOS Installer"
+  step "Starting sldl-gui for macOS Installer"
 
   # 1. Detect Architecture
   info "Detecting system architecture..."
@@ -62,7 +62,7 @@ main() {
   fi
   
   # Try the version-specific DMG naming pattern
-  ASSET_NAME="SoulseekDownloader-${ARCH}-${OS_SUFFIX}.dmg"
+  ASSET_NAME="sldl-gui-${ARCH}-${OS_SUFFIX}.dmg"
   DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/latest/download/${ASSET_NAME}"
   
   info "Downloading from: $DOWNLOAD_URL"
@@ -88,7 +88,7 @@ main() {
   
   info "Copying the application..."
   # Copy the app from the mounted DMG to Applications
-  cp -R "$MOUNT_POINT/SoulseekDownloader.app" "$INSTALL_DIR/" || fail "Failed to copy the application."
+  cp -R "$MOUNT_POINT/sldl-gui.app" "$INSTALL_DIR/" || fail "Failed to copy the application."
   
   # 5. Clean up
   info "Cleaning up..."
@@ -97,11 +97,11 @@ main() {
 
   success "Installation complete!"
   echo ""
-  echo "You can now find SoulseekDownloader in:"
-  echo "$INSTALL_DIR/SoulseekDownloader.app"
+  echo "You can now find sldl-gui in:"
+echo "$INSTALL_DIR/sldl-gui.app"
   echo ""
   echo "To run it, you can double-click the app or use this command:"
-  echo "open \"$INSTALL_DIR/SoulseekDownloader.app\""
+  echo "open \"$INSTALL_DIR/sldl-gui.app\""
   echo ""
   echo "Note: The app now bundles sldl internally, so no additional dependencies are required."
 }

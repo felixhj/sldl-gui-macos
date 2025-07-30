@@ -1,0 +1,27 @@
+---
+alwaysApply: true
+---
+
+In every project, and after every significant operation or change, please keep/update two logs:
+
+- a log of the changes made (in .cursor/logs/changes.md)
+- a log of the current project structure, layout, architecture, design approach, choices in terms of tools / dependencies / languages (in .cursor/logs/project-structure.md)
+
+A "significant operation" includes:
+
+- File creation, deletion, or renaming
+- Code modifications that change functionality
+- Dependency updates
+- Configuration changes
+- Build process modifications
+- Any change that affects the project structure or behavior
+
+**CRITICAL**:
+
+1. Update these logs BEFORE responding to the user with completion status. Include the date and time, type of change, description, and impact for each entry.
+2. ALWAYS read and reference these logs at the beginning of every user interaction to understand the current project state and recent changes.
+3. Use the logs to inform decisions and avoid repeating work that has already been done.
+
+The idea of this is to allow cursor to reference this, to prevent problems with the limitations of context windows, to mean that cursor doesn't have to repeatedly read all the project files in order to understand what the user is trying to do, and to allow cursor to understand context between chats.
+
+These logs can then be used to inform the readme.md

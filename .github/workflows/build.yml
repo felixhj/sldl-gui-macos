@@ -91,13 +91,13 @@ jobs:
 
       - name: Build the application with PyInstaller
         run: |
-          pyinstaller --noconfirm --windowed --name="SoulseekDownloader" \
+          pyinstaller --noconfirm --windowed --name="sldl-gui" \
             --add-binary="bin/sldl:bin" \
             --add-data="csv_processor.py:." \
             --icon=icon.icns \
             --osx-entitlements-file="entitlements.plist" \
-            --codesign-identity="SoulseekDownloader Developer" \
-            soulseek_downloader.py
+            --codesign-identity="sldl-gui-developer" \
+            sldl-gui-macos.py
 
       - name: Create DMG
         run: |
@@ -109,15 +109,15 @@ jobs:
             OS_VERSION="sonoma"
           fi
           create-dmg \
-            --volname "SoulseekDownloader Installer" \
+            --volname "sldl-gui Installer" \
             --window-pos 200 120 \
             --window-size 800 400 \
             --icon-size 100 \
-            --icon "SoulseekDownloader.app" 200 190 \
-            --hide-extension "SoulseekDownloader.app" \
+            --icon "sldl-gui.app" 200 190 \
+            --hide-extension "sldl-gui.app" \
             --app-drop-link 600 185 \
-            "SoulseekDownloader-${{ matrix.arch }}-$OS_VERSION.dmg" \
-            "dist/SoulseekDownloader.app"
+            "sldl-gui-${{ matrix.arch }}-$OS_VERSION.dmg" \
+            "dist/sldl-gui.app"
 
       - name: Create Release and Upload Asset
         uses: softprops/action-gh-release@v1

@@ -1,4 +1,4 @@
-# Building SLDL GUI for macOS for macOS 12 (Monterey)
+# Building sldl-gui for macOS for macOS 12 (Monterey)
 
 Since GitHub Actions no longer supports macOS 12 runners, the Monterey build needs to be created locally. This guide will walk you through the process.
 
@@ -81,25 +81,25 @@ unzip -o sldl_osx-x64.zip
 chmod +x sldl
 
 # 4. Build the application
-pyinstaller --noconfirm --windowed --name="SoulseekDownloader" \
+pyinstaller --noconfirm --windowed --name="sldl-gui" \
     --add-binary="sldl:." \
     --add-data="csv_processor.py:." \
     --icon=icon.icns \
     --osx-entitlements-file="entitlements.plist" \
-    soulseek_downloader.py
+    sldl-gui-macos.py
 
 # 5. Create DMG
 brew install create-dmg
 create-dmg \
-    --volname "SoulseekDownloader Installer" \
+    --volname "sldl-gui Installer" \
     --window-pos 200 120 \
     --window-size 800 400 \
     --icon-size 100 \
-    --icon "SoulseekDownloader.app" 200 190 \
-    --hide-extension "SoulseekDownloader.app" \
+    --icon "sldl-gui.app" 200 190 \
+    --hide-extension "sldl-gui.app" \
     --app-drop-link 600 185 \
-    "SoulseekDownloader-x64-monterey.dmg" \
-    "dist/SoulseekDownloader.app"
+    "sldl-gui-x64-monterey.dmg" \
+    "dist/sldl-gui.app"
 ```
 
 ## Uploading to GitHub Releases
@@ -118,7 +118,7 @@ Or manually:
 gh release create v1.1.0 --draft --title "Release v1.1.0" --notes "Release v1.1.0 with Monterey support"
 
 # Upload the DMG
-gh release upload v1.1.0 SoulseekDownloader-x64-monterey.dmg
+gh release upload v1.1.0 sldl-gui-x64-monterey.dmg
 ```
 
 ## Troubleshooting
@@ -167,8 +167,8 @@ If the build fails, check:
 
 After a successful build, you'll have:
 
-- `SoulseekDownloader-x64-monterey.dmg` - The installer for Intel Macs
-- `SoulseekDownloader-arm64-monterey.dmg` - The installer for Apple Silicon Macs (if built on M1/M2)
+- `sldl-gui-x64-monterey.dmg` - The installer for Intel Macs
+- `sldl-gui-arm64-monterey.dmg` - The installer for Apple Silicon Macs (if built on M1/M2)
 
 ## Why Local Build for Monterey?
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# SLDL GUI for macOS Monterey Local Build Script
+# sldl-gui for macOS Monterey Local Build Script
 # This script builds the app locally on macOS 12 (Monterey) for distribution
 
 set -e  # Exit on any error
@@ -121,14 +121,14 @@ download_slsk_batchdl() {
 
 # Build the application
 build_application() {
-    log_info "Building SoulseekDownloader application..."
+    log_info "Building sldl-gui application..."
     
     # Build with PyInstaller
-    ./venv_monterey/bin/pyinstaller --noconfirm --windowed --name="SoulseekDownloader" \
+    ./venv_monterey/bin/pyinstaller --noconfirm --windowed --name="sldl-gui" \
         --add-binary="bin/sldl:bin" \
         --icon=icon.icns \
         --osx-entitlements-file="entitlements.plist" \
-        soulseek_downloader.py
+        sldl-gui-macos.py
     
     log_success "Application built successfully"
 }
@@ -143,20 +143,34 @@ create_dmg() {
         brew install create-dmg
     fi
     
-    # Create DMG
+    # Create a temporary directory for DMG contents
+    DMG_TEMP_DIR=$(mktemp -d)
+    
+    # Copy the app to the temp directory
+    cp -R "dist/sldl-gui.app" "$DMG_TEMP_DIR/"
+    
+    # Copy the uninstall script to the temp directory
+    cp "uninstall.command" "$DMG_TEMP_DIR/"
+    
+    # Create DMG with both app and uninstall script
     create-dmg \
-        --volname "SoulseekDownloader Installer" \
+        --volname "sldl-gui Installer" \
         --window-pos 200 120 \
         --window-size 800 400 \
         --icon-size 100 \
-        --icon "SoulseekDownloader.app" 200 190 \
-        --hide-extension "SoulseekDownloader.app" \
+        --icon "sldl-gui.app" 200 190 \
+        --hide-extension "sldl-gui.app" \
+        --icon "uninstall.command" 400 190 \
+        --hide-extension "uninstall.command" \
         --app-drop-link 600 185 \
         --hdiutil-quiet \
-        "SoulseekDownloader-$ARCH-monterey.dmg" \
-        "dist/SoulseekDownloader.app"
+        "sldl-gui-$ARCH-monterey.dmg" \
+        "$DMG_TEMP_DIR"
     
-    log_success "DMG created: SoulseekDownloader-$ARCH-monterey.dmg"
+    # Clean up temp directory
+    rm -rf "$DMG_TEMP_DIR"
+    
+    log_success "DMG created: sldl-gui-$ARCH-monterey.dmg"
 }
 
 # Clean up
@@ -165,7 +179,7 @@ cleanup() {
     
     # Remove build artifacts
     rm -rf build/
-    rm -rf dist/SoulseekDownloader/
+    rm -rf dist/sldl-gui/
     rm -f "sldl_osx-$ARCH.zip"
     rm -rf bin
     
@@ -178,7 +192,7 @@ cleanup() {
     find . -name "*.pyo" -delete
     
     # Remove PyInstaller spec file if it exists
-    rm -f SoulseekDownloader.spec
+    rm -f "sldl-gui.spec"
     
     # Remove any temporary files
     rm -f sldl.pdb
@@ -198,11 +212,11 @@ main() {
     create_dmg
     cleanup
     
-    log_success "Build complete! DMG file: SoulseekDownloader-$ARCH-monterey.dmg"
+    log_success "Build complete! DMG file: sldl-gui-$ARCH-monterey.dmg"
     echo ""
     echo "You can now upload this DMG to your GitHub release."
     echo "To upload to GitHub releases, you can use:"
-    echo "gh release upload <tag> SoulseekDownloader-$ARCH-monterey.dmg"
+    echo "gh release upload <tag> sldl-gui-$ARCH-monterey.dmg"
 }
 
 # Run main function

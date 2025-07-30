@@ -77,8 +77,8 @@ matrix:
 
 This creates:
 
-- `SoulseekDownloader-x64-ventura.dmg` (Intel Macs)
-- `SoulseekDownloader-arm64-sonoma.dmg` (Apple Silicon Macs)
+- `sldl-gui-x64-ventura.dmg` (Intel Macs)
+- `sldl-gui-arm64-sonoma.dmg` (Apple Silicon Macs)
 
 ## Benefits of This Approach
 

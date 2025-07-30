@@ -1,4 +1,4 @@
-# SLDL GUI for macOS Python Dependencies
+# sldl-gui for macOS Python Dependencies
 # Requires PyObjC for the Cocoa GUI implementation
 
 # Core PyObjC frameworks for macOS GUI
