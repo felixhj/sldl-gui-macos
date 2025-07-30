@@ -1,7 +1,3 @@
----
-alwaysApply: true
----
-
 In every project, and after every significant operation or change, please keep/update two logs:
 
 - a log of the changes made (in .cursor/logs/changes.md)
@@ -21,6 +17,24 @@ A "significant operation" includes:
 1. Update these logs BEFORE responding to the user with completion status. Include the date and time, type of change, description, and impact for each entry.
 2. ALWAYS read and reference these logs at the beginning of every user interaction to understand the current project state and recent changes.
 3. Use the logs to inform decisions and avoid repeating work that has already been done.
+
+**EFFICIENT LOGGING APPROACH**:
+
+**For changes.md:**
+
+- Use APPEND-ONLY approach - add new entries to the end of the file
+- Do NOT rewrite the entire file
+- New entries should be added after the "Recent Changes" section
+- Each entry should be separated by "---" and include date/time, type, description, and impact
+- The file structure should be: Project Overview → Recent Changes → Individual entries (newest at bottom)
+
+**For project-structure.md:**
+
+- Read the existing file first to understand current structure
+- Make TARGETED updates only to sections that have changed
+- Do NOT rewrite the entire file unless major restructuring is needed
+- Update specific sections like file counts, feature lists, or technical details
+- Preserve unchanged sections to maintain efficiency
 
 The idea of this is to allow cursor to reference this, to prevent problems with the limitations of context windows, to mean that cursor doesn't have to repeatedly read all the project files in order to understand what the user is trying to do, and to allow cursor to understand context between chats.
 

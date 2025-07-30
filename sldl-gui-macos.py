@@ -108,7 +108,7 @@ class AppDelegate(NSObject):
             NSWindowStyleMaskResizable
         )
         self.window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(100.0, 100.0, 750.0, 600.0),
+            NSMakeRect(100.0, 100.0, 750.0, 650.0),  # Made window taller
             style,
             NSBackingStoreBuffered,
             False
@@ -130,8 +130,24 @@ class AppDelegate(NSObject):
         # --- Top-Down Layout ---
         y = view.frame().size.height - PADDING
 
-        # YouTube Playlist URL
+        # Source Selection (YouTube/Spotify)
         y -= CONTROL_HEIGHT
+        self.source_label = NSTextField.labelWithString_("Source:")
+        self.source_label.setFrame_(NSMakeRect(PADDING, y, LABEL_WIDTH, CONTROL_HEIGHT))
+        self.source_label.setAutoresizingMask_(NSViewMinYMargin)
+        view.addSubview_(self.source_label)
+        
+        source_field_x = PADDING + LABEL_WIDTH
+        self.source_popup = NSPopUpButton.alloc().initWithFrame_(NSMakeRect(source_field_x, y, 150, CONTROL_HEIGHT))
+        self.source_popup.addItemsWithTitles_(["YouTube Playlist", "Spotify Playlist"])
+        self.source_popup.selectItemWithTitle_("YouTube Playlist")
+        self.source_popup.setTarget_(self)
+        self.source_popup.setAction_("sourceChanged:")
+        self.source_popup.setAutoresizingMask_(NSViewMinYMargin)
+        view.addSubview_(self.source_popup)
+
+        # YouTube Playlist URL
+        y -= FIELD_Y_SPACING
         self.playlist_label = NSTextField.labelWithString_("YouTube Playlist URL:")
         self.playlist_label.setFrame_(NSMakeRect(PADDING, y, LABEL_WIDTH, CONTROL_HEIGHT))
         self.playlist_label.setAutoresizingMask_(NSViewMinYMargin)
@@ -147,6 +163,23 @@ class AppDelegate(NSObject):
         self.playlist_field.cell().setWraps_(False)
         self.playlist_field.setAutoresizingMask_(NSViewWidthSizable | NSViewMinYMargin)
         view.addSubview_(self.playlist_field)
+
+        # Spotify Playlist URL (initially hidden)
+        self.spotify_label = NSTextField.labelWithString_("Spotify Playlist URL:")
+        self.spotify_label.setFrame_(NSMakeRect(PADDING, y, LABEL_WIDTH, CONTROL_HEIGHT))
+        self.spotify_label.setAutoresizingMask_(NSViewMinYMargin)
+        self.spotify_label.setHidden_(True)
+        view.addSubview_(self.spotify_label)
+        
+        self.spotify_field = NSTextField.alloc().initWithFrame_(NSMakeRect(playlist_field_x, y, playlist_field_width, CONTROL_HEIGHT))
+        self.spotify_field.setBezelStyle_(NSTextFieldRoundedBezel)
+        self.spotify_field.setEditable_(True)
+        self.spotify_field.setSelectable_(True)
+        self.spotify_field.cell().setScrollable_(True)
+        self.spotify_field.cell().setWraps_(False)
+        self.spotify_field.setAutoresizingMask_(NSViewWidthSizable | NSViewMinYMargin)
+        self.spotify_field.setHidden_(True)
+        view.addSubview_(self.spotify_field)
 
         # Soulseek Username
         y -= FIELD_Y_SPACING
@@ -425,63 +458,65 @@ class AppDelegate(NSObject):
         self.window.makeKeyAndOrderFront_(None)
 
     def showFormatHelp_(self, sender):
-        """Show help dialog for format options."""
-        help_text = """Format & Bitrate Criteria Help:
+        """Show help dialog for format and quality settings."""
+        help_text = """Audio Format & Quality Help
 
-PREFERRED CRITERIA (First Choice):
-sldl will prioritize files matching these criteria, but will fall back to other options if none are found.
+PREFERRED (First Choice):
+These are your preferred settings. The downloader will try to find files matching these criteria first.
 
-• Format: Your preferred audio format (mp3, flac, wav, etc.)
-• Min/Max Bitrate: Your preferred quality range (e.g., 200-2500 kbps)
+STRICT (Requirements):
+These are hard requirements that must be met. Files that don't meet these criteria will be rejected.
 
-STRICT CRITERIA (Requirements):
-sldl will ONLY download files that meet these requirements. Files not matching will be skipped entirely.
+FORMATS:
+• Any: Accept any audio format
+• mp3: MP3 files
+• flac: FLAC lossless files
+• wav: WAV files
+• m4a: AAC in MP4 container
+• aac: AAC files
+• ogg: Ogg Vorbis files
+• opus: Opus files
+• wma: Windows Media Audio
+• ape: Monkey's Audio
+• alac: Apple Lossless
+• aiff: AIFF files
+• wv: WavPack files
+• shn: Shorten files
+• tak: TAK files
+• tta: True Audio files
 
-• Format: Only accept this specific format
-• Min/Max Bitrate: Hard minimum/maximum limits
+BITRATE:
+• Min: Minimum acceptable bitrate in kbps
+• Max: Maximum acceptable bitrate in kbps
+• Leave empty to accept any bitrate
 
-SUPPORTED AUDIO FORMATS:
-• mp3 - MPEG Audio Layer III (most common)
-• flac - Free Lossless Audio Codec (lossless)
-• wav - Waveform Audio File Format (uncompressed)
-• m4a - MPEG-4 Audio (AAC in MP4 container)
-• aac - Advanced Audio Coding
-• ogg - Ogg Vorbis (open source)
-• opus - Modern low-latency codec
-• wma - Windows Media Audio
-• ape - Monkey's Audio (lossless)
-• alac - Apple Lossless Audio Codec
-• aiff - Audio Interchange File Format
-• wv - WavPack (lossless)
-• shn - Shorten (lossless)
-• tak - Tom's lossless Audio Kompressor
-• tta - True Audio (lossless)
-
-EXAMPLES:
-Scenario 1 - High Quality Preferred:
-• Preferred: Format=flac, Min=1000 kbps
-• Strict: (leave empty)
-→ Prefers FLAC 1000+ kbps, but accepts lower quality if needed
-
-Scenario 2 - MP3 Only:
-• Preferred: (leave empty)  
-• Strict: Format=mp3, Min=192 kbps
-→ Only downloads MP3 files with at least 192 kbps
-
-Scenario 3 - Best of Both:
-• Preferred: Format=flac, Min=1000 kbps
-• Strict: Min=192 kbps
-→ Prefers high-quality FLAC, but accepts any format ≥192 kbps
-
-Leave fields empty to use sldl defaults.
-
-SECURITY NOTE:
-When "Remember Password" is checked, your password will be stored in plain text in:
-~/.soulseek_downloader_settings.json
-
-Only enable this on your personal, secure computer."""
+Example:
+Preferred: FLAC, 1000-2500 kbps
+Strict: MP3, 320 kbps
+This means: Try to find FLAC files first, but accept MP3 files if they're at least 320 kbps."""
         
-        self.showAlert_message_("Format Help", help_text)
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_("Format & Quality Help")
+        alert.setInformativeText_(help_text)
+        alert.addButtonWithTitle_("OK")
+        alert.runModal()
+
+    def sourceChanged_(self, sender):
+        """Handle source selection change between YouTube and Spotify."""
+        selected_source = self.source_popup.titleOfSelectedItem()
+        
+        if selected_source == "YouTube Playlist":
+            # Show YouTube fields, hide Spotify fields
+            self.playlist_label.setHidden_(False)
+            self.playlist_field.setHidden_(False)
+            self.spotify_label.setHidden_(True)
+            self.spotify_field.setHidden_(True)
+        else:  # Spotify Playlist
+            # Show Spotify fields, hide YouTube fields
+            self.playlist_label.setHidden_(True)
+            self.playlist_field.setHidden_(True)
+            self.spotify_label.setHidden_(False)
+            self.spotify_field.setHidden_(False)
 
     def appendOutput_(self, text):
         """Safely append text to the output view on the main thread."""
@@ -558,13 +593,30 @@ Only enable this on your personal, secure computer."""
     def startDownload_(self, sender):
         """Handle start download button click."""
         # Validate inputs
-        playlist_url = self.playlist_field.stringValue().strip()
+        selected_source = self.source_popup.titleOfSelectedItem()
+        
+        if selected_source == "YouTube Playlist":
+            playlist_url = self.playlist_field.stringValue().strip()
+            if not playlist_url:
+                self.showAlert_message_("Error", "Please enter a YouTube playlist URL.")
+                return
+            # Basic YouTube URL validation
+            if not any(pattern in playlist_url.lower() for pattern in ['youtube.com', 'youtu.be']):
+                self.showAlert_message_("Error", "Please enter a valid YouTube playlist URL.")
+                return
+        else:  # Spotify Playlist
+            spotify_url = self.spotify_field.stringValue().strip()
+            if not spotify_url:
+                self.showAlert_message_("Error", "Please enter a Spotify playlist URL.")
+                return
+            # Basic Spotify URL validation
+            if not any(pattern in spotify_url.lower() for pattern in ['spotify.com', 'open.spotify.com']):
+                self.showAlert_message_("Error", "Please enter a valid Spotify playlist URL.")
+                return
+        
         username = self.user_field.stringValue().strip()
         password = self.pass_field.stringValue().strip()
         
-        if not playlist_url:
-            self.showAlert_message_("Error", "Please enter a YouTube playlist URL.")
-            return
         if not username:
             self.showAlert_message_("Error", "Please enter your Soulseek username.")
             return
@@ -627,7 +679,13 @@ Only enable this on your personal, secure computer."""
     def downloadThread(self):
         """Run the download process in a background thread."""
         try:
-            playlist_url = self.playlist_field.stringValue().strip()
+            selected_source = self.source_popup.titleOfSelectedItem()
+            
+            if selected_source == "YouTube Playlist":
+                playlist_url = self.playlist_field.stringValue().strip()
+            else:  # Spotify Playlist
+                playlist_url = self.spotify_field.stringValue().strip()
+                
             username = self.user_field.stringValue().strip()
             password = self.pass_field.stringValue().strip()
             path = self.path_field.stringValue().strip()
@@ -705,7 +763,7 @@ Only enable this on your personal, secure computer."""
                 # --- Final progress logic based on user feedback ---
                 
                 # Update status based on various log messages
-                if "Loading YouTube playlist" in line:
+                if "Loading YouTube playlist" in line or "Loading Spotify playlist" in line:
                     self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", "Loading playlist...", False)
                 elif line.startswith("Login"):
                     self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", "Logging in...", False)
@@ -816,7 +874,16 @@ Only enable this on your personal, secure computer."""
             try:
                 with open(SETTINGS_FILE, 'r') as f:
                     data = json.load(f)
+                
+                # Load source selection
+                selected_source = data.get('selected_source', 'YouTube Playlist')
+                self.source_popup.selectItemWithTitle_(selected_source)
+                self.sourceChanged_(None)  # Update UI visibility
+                
+                # Load URLs
                 self.playlist_field.setStringValue_(data.get('playlist_url', ''))
+                self.spotify_field.setStringValue_(data.get('spotify_url', ''))
+                
                 self.user_field.setStringValue_(data.get('username', ''))
                 self.path_field.setStringValue_(data.get('download_path', ''))
                 
@@ -856,7 +923,9 @@ Only enable this on your personal, secure computer."""
         remember_password = bool(self.remember_password_checkbox.state())
         
         data = {
+            'selected_source': self.source_popup.titleOfSelectedItem(),
             'playlist_url': self.playlist_field.stringValue(),
+            'spotify_url': self.spotify_field.stringValue(),
             'username': self.user_field.stringValue(),
             'download_path': self.path_field.stringValue(),
             'remember_password': remember_password,
