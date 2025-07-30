@@ -35,6 +35,10 @@ SETTINGS_FILE = Path.home() / ".soulseek_downloader_settings.json"
 class AppDelegate(NSObject):
     
     def applicationDidFinishLaunching_(self, notification):
+        # Initialize process reference for stopping
+        self.current_process = None
+        self.download_running = False
+        
         if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
             self.sldl_path = Path(sys._MEIPASS) / 'bin' / 'sldl'
         else:
@@ -346,7 +350,7 @@ class AppDelegate(NSObject):
         
         y += CONTROL_HEIGHT + 10
 
-        # Start Button, Help, and Progress Bar
+        # Start Button, Stop Button, Help, and Progress Bar
         self.start_button = NSButton.alloc().initWithFrame_(NSMakeRect(PADDING, y, 150, START_BUTTON_HEIGHT))
         self.start_button.setTitle_("Start Download")
         self.start_button.setBezelStyle_(NSBezelStyleRounded)
@@ -356,7 +360,18 @@ class AppDelegate(NSObject):
         self.start_button.setAutoresizingMask_(NSViewMaxXMargin | NSViewMaxYMargin)
         view.addSubview_(self.start_button)
 
-        help_button_x = PADDING + 150 + 10
+        # Stop button (initially disabled)
+        stop_button_x = PADDING + 150 + 10
+        self.stop_button = NSButton.alloc().initWithFrame_(NSMakeRect(stop_button_x, y, 150, START_BUTTON_HEIGHT))
+        self.stop_button.setTitle_("Stop Download")
+        self.stop_button.setBezelStyle_(NSBezelStyleRounded)
+        self.stop_button.setEnabled_(False)
+        self.stop_button.setTarget_(self)
+        self.stop_button.setAction_("stopDownload:")
+        self.stop_button.setAutoresizingMask_(NSViewMaxXMargin | NSViewMaxYMargin)
+        view.addSubview_(self.stop_button)
+
+        help_button_x = stop_button_x + 150 + 10
         help_button = NSButton.alloc().initWithFrame_(NSMakeRect(help_button_x, y + 4, 120, BUTTON_HEIGHT))
         help_button.setTitle_("Show Help")
         help_button.setBezelStyle_(NSBezelStyleRounded)
@@ -523,6 +538,10 @@ Only enable this on your personal, secure computer."""
         """Safely enable/disable start button on the main thread."""
         self.start_button.setEnabled_(bool(enabled))
 
+    def enableStopButton_(self, enabled):
+        """Safely enable/disable stop button on the main thread."""
+        self.stop_button.setEnabled_(bool(enabled))
+
     def browseDirectory_(self, sender):
         """Handle browse button click."""
         panel = NSOpenPanel.openPanel()
@@ -560,8 +579,10 @@ Only enable this on your personal, secure computer."""
             self.showAlert_message_("Error", "sldl command not found. Please install slsk-batchdl first.")
             return
 
-        # Disable the start button and reset progress
+        # Disable the start button, enable stop button, and reset progress
         self.start_button.setEnabled_(False)
+        self.stop_button.setEnabled_(True)
+        self.download_running = True
         self.output_view.setString_("")
         self.total_steps = 0
         
@@ -573,6 +594,35 @@ Only enable this on your personal, secure computer."""
         # Start download in background thread
         thread = threading.Thread(target=self.downloadThread, daemon=True)
         thread.start()
+
+    def stopDownload_(self, sender):
+        """Handle stop download button click."""
+        if self.current_process and self.download_running:
+            try:
+                # Terminate the process
+                self.current_process.terminate()
+                
+                # Wait a bit for graceful termination
+                try:
+                    self.current_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    # Force kill if it doesn't terminate gracefully
+                    self.current_process.kill()
+                    self.current_process.wait()
+                
+                # Update UI
+                self.appendOutput_("🛑 Download stopped by user.\n")
+                self.updateStatusText_("Download stopped")
+                
+            except Exception as e:
+                self.appendOutput_(f"❌ Error stopping download: {str(e)}\n")
+            finally:
+                # Reset process reference and UI state
+                self.current_process = None
+                self.download_running = False
+                self.start_button.setEnabled_(True)
+                self.stop_button.setEnabled_(False)
+                self.resetProgressIndicator()
 
     def downloadThread(self):
         """Run the download process in a background thread."""
@@ -633,6 +683,9 @@ Only enable this on your personal, secure computer."""
                 bufsize=1,
                 universal_newlines=True
             )
+            
+            # Store process reference for stopping
+            self.current_process = process
 
             total_tracks = 0
             succeeded_count = 0
@@ -640,6 +693,10 @@ Only enable this on your personal, secure computer."""
             searching_count = 0
             
             for line in process.stdout:
+                # Check if download was stopped
+                if not self.download_running:
+                    break
+                    
                 # Update output on main thread
                 self.performSelectorOnMainThread_withObject_waitUntilDone_(
                     "appendOutput:", line, False
@@ -693,15 +750,22 @@ Only enable this on your personal, secure computer."""
                     self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", f"Finished: {summary}", False)
                     continue
 
-            # Wait for process to complete
-            return_code = process.wait()
+            # Wait for process to complete (only if not stopped)
+            if self.download_running:
+                return_code = process.wait()
+            else:
+                return_code = -1  # Indicate stopped by user
             
             # Reset the progress indicator state
             self.performSelectorOnMainThread_withObject_waitUntilDone_("resetProgressIndicator", None, False)
 
             # The progress bar's final state is now accurate. No need to force it.
             
-            if return_code == 0:
+            if return_code == -1:
+                # Download was stopped by user
+                self.performSelectorOnMainThread_withObject_waitUntilDone_("appendOutput:", "\n🛑 Download stopped by user.\n", False)
+                self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", "Download stopped", False)
+            elif return_code == 0:
                 if failed_count == 0 and total_tracks > 0:
                     self.performSelectorOnMainThread_withObject_waitUntilDone_("appendOutput:", "\n✅ Download completed successfully!\n", False)
                 elif total_tracks > 0:
@@ -718,10 +782,18 @@ Only enable this on your personal, secure computer."""
             self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", "An error occurred", False)
         
         finally:
-            # Re-enable the start button
+            # Reset process reference and UI state
+            self.current_process = None
+            self.download_running = False
+            
+            # Re-enable the start button and disable stop button
             self.performSelectorOnMainThread_withObject_waitUntilDone_(
                 "enableStartButton:", True, False
             )
+            self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                "enableStopButton:", False, False
+            )
+            
             # Save settings
             self.performSelectorOnMainThread_withObject_waitUntilDone_(
                 "saveSettings", None, False

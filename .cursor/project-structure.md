@@ -21,6 +21,7 @@ SLDL GUI for macOS is a Python-based desktop application that provides a graphic
 - **Self-Contained**: Bundles the `sldl` dependency with the application
 - **Settings Persistence**: Automatically saves and restores user preferences
 - **Automated Processing**: Post-download CSV processing and cleanup
+- **User Control**: Stop button functionality for interrupting long-running downloads
 
 ## Project Structure
 
@@ -38,7 +39,7 @@ sldl-gui-macos/
 ├── .vscode/                          # VSCode configuration
 │   └── settings.json                 # Editor settings
 ├── dist/                             # Build output directory
-├── soulseek_downloader.py            # Main application (892 lines)
+├── sldl-gui-macos.py                 # Main application (964 lines)
 ├── csv_processor.py                  # CSV processing module (218 lines)
 ├── requirements.txt                  # Python dependencies
 ├── install.sh                        # Installation script
@@ -54,18 +55,19 @@ sldl-gui-macos/
 
 ## Core Components
 
-### 1. Main Application (`soulseek_downloader.py`)
+### 1. Main Application (`sldl-gui-macos.py`)
 
-- **Size**: 892 lines
+- **Size**: 964 lines
 - **Purpose**: Main GUI application and business logic
 - **Key Classes**:
   - `AppDelegate`: Main application delegate handling UI and lifecycle
 - **Key Features**:
   - YouTube playlist URL processing
   - Soulseek authentication
-  - Download progress tracking
+  - Download progress tracking with stop button functionality
   - Settings management
   - Thread-safe operations
+  - Process management and termination
 
 ### 2. CSV Processor (`csv_processor.py`)
 
@@ -85,6 +87,29 @@ sldl-gui-macos/
 - **Monterey Builds**: `build_monterey.sh` - Local build process for macOS 12
 - **CI/CD**: GitHub Actions workflow for automated builds
 - **Distribution**: Multiple build variants for different macOS versions
+
+## Key Features
+
+### Download Management
+
+- **Start/Stop Control**: Users can start downloads and interrupt them at any time
+- **Progress Tracking**: Real-time progress bar with step-by-step status updates
+- **Thread Safety**: Background download threads with proper UI synchronization
+- **Process Management**: Graceful process termination with timeout and force kill fallback
+
+### User Interface
+
+- **Native macOS Design**: Cocoa-based interface with native look and feel
+- **Responsive Layout**: Proper autoresizing and layout management
+- **Status Feedback**: Real-time status updates and progress indication
+- **Settings Persistence**: Automatic saving and restoration of user preferences
+
+### Audio Format Control
+
+- **Preferred Criteria**: First-choice format and quality settings
+- **Strict Requirements**: Hard requirements that must be met
+- **Multiple Formats**: Support for 16 different audio formats
+- **Bitrate Control**: Configurable minimum and maximum bitrate requirements
 
 ## Dependencies
 
@@ -116,15 +141,21 @@ pyobjc-core>=9.0               # Core PyObjC functionality
 
 ### 3. Thread-Safe Architecture
 
-- **Choice**: Background threads for downloads
+- **Choice**: Background threads for downloads with proper synchronization
 - **Rationale**: Keeps GUI responsive during long-running operations
-- **Implementation**: Threading module with proper synchronization
+- **Implementation**: Threading module with `self.download_running` flag and main thread UI updates
 
 ### 4. Settings Persistence
 
 - **Choice**: JSON-based settings file
 - **Location**: `~/.soulseek_downloader_settings.json`
 - **Rationale**: Simple, human-readable, no database required
+
+### 5. Process Control
+
+- **Choice**: Subprocess management with graceful termination
+- **Rationale**: Allows users to interrupt downloads safely
+- **Implementation**: 5-second timeout for graceful shutdown, force kill as fallback
 
 ## Build and Distribution
 
@@ -139,14 +170,14 @@ pyobjc-core>=9.0               # Core PyObjC functionality
 1. Architecture detection (Intel/Apple Silicon)
 2. macOS version detection
 3. Download appropriate build variant
-4. Install to `~/Applications/SoulseekDownloader`
+4. Install to `~/Applications/sldl-gui`
 
 ## Development Workflow
 
 ### Local Development
 
 - Python 3.x with PyObjC installed
-- Direct execution of `soulseek_downloader.py`
+- Direct execution of `sldl-gui-macos.py`
 - VSCode configuration for development
 
 ### CI/CD Pipeline
@@ -164,6 +195,7 @@ pyobjc-core>=9.0               # Core PyObjC functionality
 - Enhanced error handling and recovery
 - Plugin system for additional features
 - Cloud sync for settings and preferences
+- Advanced download queue management
 
 ### Maintenance
 
@@ -174,5 +206,5 @@ pyobjc-core>=9.0               # Core PyObjC functionality
 
 ---
 
-_Last Updated: 2024-12-19_
+_Last Updated: 2024-12-19 17:15_
 _Maintained by: Cursor AI Assistant_
