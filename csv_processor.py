@@ -80,8 +80,13 @@ class SLDLCSVProcessor:
                 if 'failurereason' in fieldnames and 'failure_description' not in fieldnames:
                     fieldnames.append('failure_description')
                 
-                # Process each row
+                # Read all rows and ensure all fields are included in fieldnames
                 for row in reader:
+                    # Add any missing fields to fieldnames
+                    for field in row.keys():
+                        if field not in fieldnames:
+                            fieldnames.append(field)
+                    
                     # Add state description
                     if 'state' in row and row['state'].isdigit():
                         state_code = int(row['state'])

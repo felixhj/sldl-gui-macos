@@ -1,0 +1,50 @@
+sdl-gui-macos - User Guide
+================================
+
+## Source selection
+SLDL GUI supports multiple input sources for batch downloading:
+Note on CSV files: needs two columns - 'artist' and 'title'
+
+## Easily finding your soulseek password
+1. Open Soulseek
+2. Click "Options" in the menu bar
+3. Click "Disconnect" 
+4. Click "Login as..."
+5. Your password will be visible in the password field
+(yes this is a bad way to manage password and yes soulseek should update this)
+
+## Listening port
+I won't lie, I don't really understand this. My advice would be to just not touch this field if things are working. 
+My basic understanding is that if you have a modern router that has automatic port mapping (which they all should do) - as long as the port isn't being used by another application, the router will work out which one soulseek is using. 
+As such an appropriatley high port number is selected, as this is less likely to interfere with other applications. You might want to refer to lists of common port mappings to check this - wikipedia has a list. Essentially everything below 49152 is registered, so you'd probably want to go above this. The max port number is 65535.
+If you have an older router, you might need to set up port forwarding manually - you'll have to research this yourself. 
+Soulseeks port status checking website only works for manual port forwarding, so a failed test doesn't necessarily mean you're not reachable. 
+
+## Wishlist Features
+When *wishlist mode* is on, the following functions will occur:
+- Failed or stopped downloads are automatically added to an internal wishlist which is saved between sessions
+- Subsequent successfully downloaded tracks that are on the wishlist are removed from the wishlist (including when downloaded using sources other than 'Wishlist')
+
+Why is this useful?
+Some downloads will fail. Instead of keeping track of these manually and re-running searches, the gui will do this for you. 
+
+Other wishlist features:
+- You can select your wishlist from the sources, and this will be used for your search criteria. This means you can regularly recheck for files that weren't available the last time they were searched. 
+- 'View' shows current entries
+- 'Export' saves this as a .csv
+- 'Import' allows you to populate the internal wishlist from a .csv file
+- 'Clear' clears
+
+You can manually edit your wishlist if you wish(list):
+~/.soulseek_downloader_wishlist.csv
+
+## Audio Format and Quality Controls
+- Preferred: Prefers a certain format/bitrate, but will accept others if preferred not found
+- Mandatory: Only accepts a certain format/bitrate
+
+## Extra tools
+- 'output to .csv takes the currently selected spotify or youtube playlist and outputs this to a .csv file in the target directory
+
+---
+
+For more information about Soulseek, visit the official Soulseek website and documentation.

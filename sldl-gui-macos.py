@@ -24,13 +24,13 @@ try:
         NSScrollView, NSTextView, NSProgressIndicator, NSMakeRect,
         NSWindowStyleMaskTitled, NSWindowStyleMaskClosable,
         NSWindowStyleMaskResizable, NSBackingStoreBuffered,
-        NSOpenPanel, NSObject, NSApplicationActivationPolicyRegular,
-        NSString, NSAlert, NSAlertFirstButtonReturn, NSModalResponseOK, NSPopUpButton,
+        NSOpenPanel, NSSavePanel, NSObject, NSApplicationActivationPolicyRegular,
+        NSString, NSAlert, NSAlertFirstButtonReturn, NSAlertSecondButtonReturn, NSModalResponseOK, NSPopUpButton,
         NSButtonTypeSwitch, NSMenu, NSMenuItem, NSColor,
         NSFontAttributeName, NSForegroundColorAttributeName,
         NSBezelStyleRounded, NSTextFieldRoundedBezel,
         NSViewWidthSizable, NSViewHeightSizable, NSViewMinXMargin,
-        NSViewMaxXMargin, NSViewMinYMargin, NSViewMaxYMargin
+        NSViewMaxXMargin, NSViewMinYMargin, NSViewMaxYMargin, NSThread
     )
 except ImportError as e:
     print(f"Error importing PyObjC: {e}")
@@ -38,6 +38,7 @@ except ImportError as e:
     sys.exit(1)
 
 SETTINGS_FILE = Path.home() / ".soulseek_downloader_settings.json"
+WISHLIST_FILE = Path.home() / ".soulseek_downloader_wishlist.csv"
 
 def check_for_updates():
     """Check for updates by comparing current version with latest GitHub release."""
@@ -185,7 +186,7 @@ class AppDelegate(NSObject):
             NSWindowStyleMaskResizable
         )
         self.window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(100.0, 100.0, 750.0, 620.0),  # Reduced height due to space optimization
+            NSMakeRect(100.0, 100.0, 750.0, 680.0),  # Increased height for wishlist controls
             style,
             NSBackingStoreBuffered,
             False
@@ -216,7 +217,7 @@ class AppDelegate(NSObject):
         
         source_field_x = PADDING + 60
         self.source_popup = NSPopUpButton.alloc().initWithFrame_(NSMakeRect(source_field_x, y, 150, CONTROL_HEIGHT))
-        self.source_popup.addItemsWithTitles_(["YouTube Playlist", "Spotify Playlist", "Wishlist"])
+        self.source_popup.addItemsWithTitles_(["YouTube Playlist", "Spotify Playlist", "Wishlist", "CSV File"])
         self.source_popup.selectItemWithTitle_("YouTube Playlist")
         self.source_popup.setTarget_(self)
         self.source_popup.setAction_("sourceChanged:")
@@ -228,6 +229,7 @@ class AppDelegate(NSObject):
         self.url_label = NSTextField.labelWithString_("URL:")
         self.url_label.setFrame_(NSMakeRect(url_label_x, y, 40, CONTROL_HEIGHT))
         self.url_label.setAutoresizingMask_(NSViewMinYMargin)
+        self.url_label.setHidden_(True)  # Hide by default, will be shown only when needed
         view.addSubview_(self.url_label)
         
         url_field_x = url_label_x + 40
@@ -239,6 +241,7 @@ class AppDelegate(NSObject):
         self.playlist_field.cell().setScrollable_(True)
         self.playlist_field.cell().setWraps_(False)
         self.playlist_field.setAutoresizingMask_(NSViewWidthSizable | NSViewMinYMargin)
+        self.playlist_field.setPlaceholderString_("https://www.youtube.com/playlist?list=...")
         view.addSubview_(self.playlist_field)
 
         # Spotify Playlist URL (initially hidden)
@@ -256,6 +259,7 @@ class AppDelegate(NSObject):
         self.spotify_field.cell().setWraps_(False)
         self.spotify_field.setAutoresizingMask_(NSViewWidthSizable | NSViewMinYMargin)
         self.spotify_field.setHidden_(True)
+        self.spotify_field.setPlaceholderString_("https://open.spotify.com/playlist/...")
         view.addSubview_(self.spotify_field)
 
         # Wishlist File (initially hidden)
@@ -285,6 +289,29 @@ class AppDelegate(NSObject):
         self.wishlist_browse_button.setAutoresizingMask_(NSViewMinXMargin | NSViewMinYMargin)
         self.wishlist_browse_button.setHidden_(True)
         view.addSubview_(self.wishlist_browse_button)
+
+        # CSV File (initially hidden)
+        csv_field_width = url_field_width - 90  # Make room for browse button
+        self.csv_field = NSTextField.alloc().initWithFrame_(NSMakeRect(url_field_x, y, csv_field_width, CONTROL_HEIGHT))
+        self.csv_field.setBezelStyle_(NSTextFieldRoundedBezel)
+        self.csv_field.setEditable_(True)
+        self.csv_field.setSelectable_(True)
+        self.csv_field.cell().setScrollable_(True)
+        self.csv_field.cell().setWraps_(False)
+        self.csv_field.setAutoresizingMask_(NSViewWidthSizable | NSViewMinYMargin)
+        self.csv_field.setHidden_(True)
+        self.csv_field.setPlaceholderString_("Select a CSV file with artist and title columns")
+        view.addSubview_(self.csv_field)
+        
+        csv_browse_button_x = url_field_x + csv_field_width + 10
+        self.csv_browse_button = NSButton.alloc().initWithFrame_(NSMakeRect(csv_browse_button_x, y, 80, BUTTON_HEIGHT))
+        self.csv_browse_button.setTitle_("Browse")
+        self.csv_browse_button.setBezelStyle_(NSBezelStyleRounded)
+        self.csv_browse_button.setTarget_(self)
+        self.csv_browse_button.setAction_("browseCSVFile:")
+        self.csv_browse_button.setAutoresizingMask_(NSViewMinXMargin | NSViewMinYMargin)
+        self.csv_browse_button.setHidden_(True)
+        view.addSubview_(self.csv_browse_button)
 
         # Soulseek Username, Password, and Remember Password on same line
         y -= FIELD_Y_SPACING
@@ -374,6 +401,63 @@ class AppDelegate(NSObject):
         self.browse_button.setAutoresizingMask_(NSViewMinXMargin | NSViewMinYMargin)
         view.addSubview_(self.browse_button)
 
+        # --- Wishlist Management Section ---
+        y -= FIELD_Y_SPACING
+        wishlist_section_label = NSTextField.labelWithString_("Wishlist Management")
+        wishlist_section_label.setFrame_(NSMakeRect(PADDING, y, 200, CONTROL_HEIGHT))
+        wishlist_section_label.setFont_(objc.lookUpClass("NSFont").boldSystemFontOfSize_(13))
+        wishlist_section_label.setAutoresizingMask_(NSViewMinYMargin)
+        view.addSubview_(wishlist_section_label)
+
+        y -= FIELD_Y_SPACING
+        # Wishlist Mode checkbox
+        self.wishlist_mode_checkbox = NSButton.alloc().initWithFrame_(NSMakeRect(PADDING, y, 150, CONTROL_HEIGHT))
+        self.wishlist_mode_checkbox.setButtonType_(NSButtonTypeSwitch)
+        self.wishlist_mode_checkbox.setTitle_("Wishlist Mode")
+        self.wishlist_mode_checkbox.setState_(False)
+        self.wishlist_mode_checkbox.setAutoresizingMask_(NSViewMinYMargin)
+        view.addSubview_(self.wishlist_mode_checkbox)
+
+        # View Wishlist button
+        view_wishlist_x = PADDING + 160
+        self.view_wishlist_button = NSButton.alloc().initWithFrame_(NSMakeRect(view_wishlist_x, y, 100, BUTTON_HEIGHT))
+        self.view_wishlist_button.setTitle_("View")
+        self.view_wishlist_button.setBezelStyle_(NSBezelStyleRounded)
+        self.view_wishlist_button.setTarget_(self)
+        self.view_wishlist_button.setAction_("viewWishlist:")
+        self.view_wishlist_button.setAutoresizingMask_(NSViewMinXMargin | NSViewMinYMargin)
+        view.addSubview_(self.view_wishlist_button)
+
+        # Import Wishlist button
+        import_wishlist_x = view_wishlist_x + 110
+        self.import_wishlist_button = NSButton.alloc().initWithFrame_(NSMakeRect(import_wishlist_x, y, 100, BUTTON_HEIGHT))
+        self.import_wishlist_button.setTitle_("Import")
+        self.import_wishlist_button.setBezelStyle_(NSBezelStyleRounded)
+        self.import_wishlist_button.setTarget_(self)
+        self.import_wishlist_button.setAction_("importWishlist:")
+        self.import_wishlist_button.setAutoresizingMask_(NSViewMinXMargin | NSViewMinYMargin)
+        view.addSubview_(self.import_wishlist_button)
+
+        # Export Wishlist button
+        export_wishlist_x = import_wishlist_x + 110
+        self.export_wishlist_button = NSButton.alloc().initWithFrame_(NSMakeRect(export_wishlist_x, y, 100, BUTTON_HEIGHT))
+        self.export_wishlist_button.setTitle_("Export")
+        self.export_wishlist_button.setBezelStyle_(NSBezelStyleRounded)
+        self.export_wishlist_button.setTarget_(self)
+        self.export_wishlist_button.setAction_("exportWishlist:")
+        self.export_wishlist_button.setAutoresizingMask_(NSViewMinXMargin | NSViewMinYMargin)
+        view.addSubview_(self.export_wishlist_button)
+
+        # Clear Wishlist button
+        clear_wishlist_x = export_wishlist_x + 110
+        self.clear_wishlist_button = NSButton.alloc().initWithFrame_(NSMakeRect(clear_wishlist_x, y, 100, BUTTON_HEIGHT))
+        self.clear_wishlist_button.setTitle_("Clear")
+        self.clear_wishlist_button.setBezelStyle_(NSBezelStyleRounded)
+        self.clear_wishlist_button.setTarget_(self)
+        self.clear_wishlist_button.setAction_("clearWishlist:")
+        self.clear_wishlist_button.setAutoresizingMask_(NSViewMinXMargin | NSViewMinYMargin)
+        view.addSubview_(self.clear_wishlist_button)
+
         # --- Audio Format Section ---
         y -= SECTION_SPACING
         format_section_label = NSTextField.labelWithString_("Audio Format & Quality Criteria")
@@ -383,13 +467,13 @@ class AppDelegate(NSObject):
         view.addSubview_(format_section_label)
 
         y -= FIELD_Y_SPACING
-        preferred_header = NSTextField.labelWithString_("Preferred (First Choice)")
+        preferred_header = NSTextField.labelWithString_("Preferred")
         preferred_header.setFrame_(NSMakeRect(PADDING, y, 200, CONTROL_HEIGHT))
         preferred_header.setFont_(objc.lookUpClass("NSFont").boldSystemFontOfSize_(12))
         preferred_header.setAutoresizingMask_(NSViewMinYMargin)
         view.addSubview_(preferred_header)
 
-        strict_header = NSTextField.labelWithString_("Strict (Requirements)")
+        strict_header = NSTextField.labelWithString_("Mandatory")
         strict_header.setFrame_(NSMakeRect(350, y, 200, CONTROL_HEIGHT))
         strict_header.setFont_(objc.lookUpClass("NSFont").boldSystemFontOfSize_(12))
         strict_header.setAutoresizingMask_(NSViewMinYMargin)
@@ -524,10 +608,10 @@ class AppDelegate(NSObject):
 
         help_button_x = stop_button_x + 150 + 10
         help_button = NSButton.alloc().initWithFrame_(NSMakeRect(help_button_x, y + 4, 120, BUTTON_HEIGHT))
-        help_button.setTitle_("Show Help")
+        help_button.setTitle_("Guides")
         help_button.setBezelStyle_(NSBezelStyleRounded)
         help_button.setTarget_(self)
-        help_button.setAction_("showFormatHelp:")
+        help_button.setAction_("showGuides:")
         help_button.setAutoresizingMask_(NSViewMaxXMargin | NSViewMaxYMargin)
         view.addSubview_(help_button)
 
@@ -575,81 +659,135 @@ class AppDelegate(NSObject):
 
         self.window.makeKeyAndOrderFront_(None)
 
-    def showFormatHelp_(self, sender):
-        """Show help dialog for format and quality settings."""
-        help_text = """Audio Format & Quality Help
-
-PREFERRED (First Choice):
-These are your preferred settings. The downloader will try to find files matching these criteria first.
-
-STRICT (Requirements):
-These are hard requirements that must be met. Files that don't meet these criteria will be rejected.
-
-FORMATS:
-• Any: Accept any audio format
-• mp3: MP3 files
-• flac: FLAC lossless files
-• wav: WAV files
-• m4a: AAC in MP4 container
-• aac: AAC files
-• ogg: Ogg Vorbis files
-• opus: Opus files
-• wma: Windows Media Audio
-• ape: Monkey's Audio
-• alac: Apple Lossless
-• aiff: AIFF files
-• wv: WavPack files
-• shn: Shorten files
-• tak: TAK files
-• tta: True Audio files
-
-BITRATE:
-• Min: Minimum acceptable bitrate in kbps
-• Max: Maximum acceptable bitrate in kbps
-• Leave empty to accept any bitrate
-
-Example:
-Preferred: FLAC, 1000-2500 kbps
-Strict: MP3, 320 kbps
-This means: Try to find FLAC files first, but accept MP3 files if they're at least 320 kbps."""
+    def showGuides_(self, sender):
+        """Show comprehensive guides dialog by fetching from GitHub repo."""
+        import urllib.request
+        import urllib.error
         
-        alert = NSAlert.alloc().init()
-        alert.setMessageText_("Format & Quality Help")
-        alert.setInformativeText_(help_text)
-        alert.addButtonWithTitle_("OK")
-        alert.runModal()
+        # GitHub raw URL for guides.txt
+        guides_url = "https://raw.githubusercontent.com/felixb/sldl-gui-macos/main/guides.txt"
+        
+        try:
+            # Fetch guides from GitHub
+            with urllib.request.urlopen(guides_url) as response:
+                guides_text = response.read().decode('utf-8')
+        except urllib.error.URLError as e:
+            # Fallback to local file if GitHub is unavailable
+            try:
+                import os
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                guides_path = os.path.join(script_dir, "guides.txt")
+                with open(guides_path, 'r', encoding='utf-8') as f:
+                    guides_text = f.read()
+            except FileNotFoundError:
+                guides_text = "Unable to load guides. Please check your internet connection or visit the GitHub repository."
+        except Exception as e:
+            guides_text = f"Error loading guides: {str(e)}"
+        
+        # Create a larger window for the guides
+        guides_window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+            NSMakeRect(100.0, 100.0, 800.0, 600.0),
+            NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable,
+            NSBackingStoreBuffered,
+            False
+        )
+        guides_window.setTitle_("SLDL GUI Guides")
+        guides_window.center()
+        
+        # Create scroll view for the guides text
+        scroll_view = NSScrollView.alloc().initWithFrame_(guides_window.contentView().bounds())
+        scroll_view.setHasVerticalScroller_(True)
+        scroll_view.setHasHorizontalScroller_(False)
+        scroll_view.setAutohidesScrollers_(True)
+        scroll_view.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
+        
+        # Create text view for the guides content
+        text_view = NSTextView.alloc().initWithFrame_(scroll_view.bounds())
+        text_view.setEditable_(False)
+        text_view.setSelectable_(True)
+        text_view.setRichText_(False)
+        
+        # Set font
+        font = objc.lookUpClass("NSFont").fontWithName_size_("Monaco", 11.0)
+        if font is None:
+            font = objc.lookUpClass("NSFont").systemFontOfSize_(11.0)
+        
+        text_view.setFont_(font)
+        text_view.setBackgroundColor_(NSColor.textBackgroundColor())
+        
+        # Set the guides text
+        text_view.setString_(guides_text)
+        
+        scroll_view.setDocumentView_(text_view)
+        guides_window.contentView().addSubview_(scroll_view)
+        
+        guides_window.makeKeyAndOrderFront_(None)
 
     def sourceChanged_(self, sender):
-        """Handle source selection change between YouTube, Spotify, and Wishlist."""
+        """Handle source selection change between YouTube, Spotify, Wishlist, and CSV File."""
         selected_source = self.source_popup.titleOfSelectedItem()
+        
+        # Calculate positions
+        source_field_x = 20 + 60  # PADDING + source label width
+        direct_field_x = source_field_x + 160  # Position after source dropdown
+        label_field_x = direct_field_x + 40   # Position after label (original)
         
         if selected_source == "YouTube Playlist":
             # Show YouTube fields, hide others
-            self.url_label.setHidden_(False)
+            self.url_label.setHidden_(True)  # Hide URL label since placeholder serves purpose
             self.playlist_field.setHidden_(False)
+            # Reposition field to eliminate gap
+            self.playlist_field.setFrame_(NSMakeRect(direct_field_x, self.playlist_field.frame().origin.y, 
+                                                    self.window.contentView().frame().size.width - direct_field_x - 20, 24))
             self.spotify_label.setHidden_(True)
             self.spotify_field.setHidden_(True)
             self.wishlist_label.setHidden_(True)
             self.wishlist_field.setHidden_(True)
             self.wishlist_browse_button.setHidden_(True)
+            self.csv_field.setHidden_(True)
+            self.csv_browse_button.setHidden_(True)
         elif selected_source == "Spotify Playlist":
             # Show Spotify fields, hide others
             self.url_label.setHidden_(True)
             self.playlist_field.setHidden_(True)
-            self.spotify_label.setHidden_(False)
+            self.spotify_label.setHidden_(True)  # Hide Spotify label since placeholder serves purpose
             self.spotify_field.setHidden_(False)
+            # Reposition field to eliminate gap
+            self.spotify_field.setFrame_(NSMakeRect(direct_field_x, self.spotify_field.frame().origin.y, 
+                                                   self.window.contentView().frame().size.width - direct_field_x - 20, 24))
             self.wishlist_label.setHidden_(True)
             self.wishlist_field.setHidden_(True)
             self.wishlist_browse_button.setHidden_(True)
-        else:  # Wishlist
-            # Show wishlist fields, hide others
+            self.csv_field.setHidden_(True)
+            self.csv_browse_button.setHidden_(True)
+        elif selected_source == "CSV File":
+            # Show CSV fields, hide others
             self.url_label.setHidden_(True)
             self.playlist_field.setHidden_(True)
             self.spotify_label.setHidden_(True)
             self.spotify_field.setHidden_(True)
-            self.wishlist_label.setHidden_(False)
-            self.wishlist_field.setHidden_(False)
-            self.wishlist_browse_button.setHidden_(False)
+            self.wishlist_label.setHidden_(True)
+            self.wishlist_field.setHidden_(True)
+            self.wishlist_browse_button.setHidden_(True)
+            self.csv_field.setHidden_(False)
+            self.csv_browse_button.setHidden_(False)
+            # Reposition CSV field to eliminate gap
+            csv_field_width = self.window.contentView().frame().size.width - direct_field_x - 20 - 90  # Make room for browse button
+            self.csv_field.setFrame_(NSMakeRect(direct_field_x, self.csv_field.frame().origin.y, csv_field_width, 24))
+            # Reposition browse button
+            csv_browse_button_x = direct_field_x + csv_field_width + 10
+            self.csv_browse_button.setFrame_(NSMakeRect(csv_browse_button_x, self.csv_browse_button.frame().origin.y, 80, 24))
+        else:  # Wishlist
+            # Hide all input fields for wishlist since we use internal wishlist
+            self.url_label.setHidden_(True)
+            self.playlist_field.setHidden_(True)
+            self.spotify_label.setHidden_(True)
+            self.spotify_field.setHidden_(True)
+            self.wishlist_label.setHidden_(True)
+            self.wishlist_field.setHidden_(True)
+            self.wishlist_browse_button.setHidden_(True)
+            self.csv_field.setHidden_(True)
+            self.csv_browse_button.setHidden_(True)
 
     def appendOutput_(self, text):
         """Safely append text to the output view on the main thread."""
@@ -739,6 +877,20 @@ This means: Try to find FLAC files first, but accept MP3 files if they're at lea
             if url:
                 self.wishlist_field.setStringValue_(url.path())
 
+    def browseCSVFile_(self, sender):
+        """Open file browser for CSV file."""
+        panel = NSOpenPanel.openPanel()
+        panel.setCanChooseFiles_(True)
+        panel.setCanChooseDirectories_(False)
+        panel.setAllowsMultipleSelection_(False)
+        panel.setTitle_("Select CSV File")
+        panel.setAllowedFileTypes_(["csv"])
+        
+        if panel.runModal() == NSModalResponseOK:
+            url = panel.URL()
+            if url:
+                self.csv_field.setStringValue_(url.path())
+
     def startDownload_(self, sender):
         """Handle start download button click."""
         # Validate inputs
@@ -762,15 +914,37 @@ This means: Try to find FLAC files first, but accept MP3 files if they're at lea
             if not any(pattern in spotify_url.lower() for pattern in ['spotify.com', 'open.spotify.com']):
                 self.showAlert_message_("Error", "Please enter a valid Spotify playlist URL.")
                 return
-        else:  # Wishlist
-            wishlist_file = self.wishlist_field.stringValue().strip()
-            if not wishlist_file:
-                self.showAlert_message_("Error", "Please enter a wishlist file path.")
+        elif selected_source == "CSV File":
+            csv_path = self.csv_field.stringValue().strip()
+            if not csv_path:
+                self.showAlert_message_("Error", "Please select a CSV file.")
                 return
-            # Check if wishlist file exists
-            wishlist_path = Path(wishlist_file).expanduser()
-            if not wishlist_path.exists():
-                self.showAlert_message_("Error", f"Wishlist file not found: {wishlist_path}")
+            # Check if file exists
+            if not Path(csv_path).exists():
+                self.showAlert_message_("Error", "The selected CSV file does not exist.")
+                return
+            # Validate CSV format
+            try:
+                import csv
+                with open(csv_path, 'r', newline='', encoding='utf-8') as csvfile:
+                    reader = csv.DictReader(csvfile)
+                    if not reader.fieldnames:
+                        self.showAlert_message_("Error", "The CSV file appears to be empty or invalid.")
+                        return
+                    # Check if it has the required columns (artist and title, or track)
+                    has_artist_title = 'artist' in reader.fieldnames and 'title' in reader.fieldnames
+                    has_track = 'track' in reader.fieldnames
+                    if not (has_artist_title or has_track):
+                        self.showAlert_message_("Error", "The CSV file must have either 'artist' and 'title' columns, or a 'track' column.")
+                        return
+            except Exception as e:
+                self.showAlert_message_("Error", f"Failed to read CSV file: {str(e)}")
+                return
+        else:  # Wishlist
+            # Check if internal wishlist has items
+            wishlist_items = self.__loadWishlistItems()
+            if not wishlist_items:
+                self.showAlert_message_("Error", "Your wishlist is empty. Please add some tracks to your wishlist first.")
                 return
         
         username = self.user_field.stringValue().strip()
@@ -848,6 +1022,9 @@ This means: Try to find FLAC files first, but accept MP3 files if they're at lea
             password = self.pass_field.stringValue().strip()
             path = self.path_field.stringValue().strip()
             
+            # Generate timestamp for folder naming
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            
             if selected_source == "YouTube Playlist":
                 input_source = self.playlist_field.stringValue().strip()
                 # Build base command for YouTube
@@ -860,12 +1037,46 @@ This means: Try to find FLAC files first, but accept MP3 files if they're at lea
                 cmd = [str(self.sldl_path), input_source, '--user', username, '--pass', password]
                 if path:
                     cmd.extend(['--path', path])
+            elif selected_source == "CSV File":
+                # Create temporary wishlist file from CSV in sldl format
+                temp_wishlist_file = self.__createSldlWishlistFileFromCSV()
+                if not temp_wishlist_file:
+                    self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                        "appendOutput:", "❌ Failed to create wishlist file from CSV for sldl.\n", False
+                    )
+                    return
+                
+                input_source = temp_wishlist_file
+                # Build base command for CSV with input-type parameter (same as wishlist)
+                cmd = [str(self.sldl_path), input_source, '--input-type', 'list', '--user', username, '--pass', password]
+                if path:
+                    # Create custom folder name for CSV: csv_YYYYMMDD_HHMMSS
+                    csv_folder = Path(path) / f"csv_{timestamp}"
+                    cmd.extend(['--path', str(csv_folder)])
+                else:
+                    # If no path specified, create in current directory
+                    csv_folder = Path.cwd() / f"csv_{timestamp}"
+                    cmd.extend(['--path', str(csv_folder)])
             else:  # Wishlist
-                input_source = self.wishlist_field.stringValue().strip()
+                # Create temporary wishlist file in sldl format
+                temp_wishlist_file = self.__createSldlWishlistFile()
+                if not temp_wishlist_file:
+                    self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                        "appendOutput:", "❌ Failed to create wishlist file for sldl.\n", False
+                    )
+                    return
+                
+                input_source = temp_wishlist_file
                 # Build base command for wishlist with input-type parameter
                 cmd = [str(self.sldl_path), input_source, '--input-type', 'list', '--user', username, '--pass', password]
                 if path:
-                    cmd.extend(['--path', path])
+                    # Create custom folder name for wishlist: wishlist_YYYYMMDD_HHMMSS
+                    wishlist_folder = Path(path) / f"wishlist_{timestamp}"
+                    cmd.extend(['--path', str(wishlist_folder)])
+                else:
+                    # If no path specified, create in current directory
+                    wishlist_folder = Path.cwd() / f"wishlist_{timestamp}"
+                    cmd.extend(['--path', str(wishlist_folder)])
 
             port = self.port_field.stringValue().strip()
             if port and port.isdigit():
@@ -921,8 +1132,45 @@ This means: Try to find FLAC files first, but accept MP3 files if they're at lea
             
             # Store process reference for stopping
             self.current_process = process
+            
+            # Store temp file for cleanup (if wishlist source)
+            temp_file_to_cleanup = None
+            initial_total_tracks = 0
+            if selected_source == "Wishlist":
+                temp_file_to_cleanup = input_source
+                # For wishlist, we can estimate total tracks from wishlist items
+                try:
+                    wishlist_items = self.__loadWishlistItems()
+                    initial_total_tracks = len(wishlist_items)
+                    if initial_total_tracks > 0:
+                        # Set initial progress for wishlist
+                        self.performSelectorOnMainThread_withObject_waitUntilDone_("switchToDeterminateProgress:", float(initial_total_tracks), False)
+                        self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", f"Processing {initial_total_tracks} wishlist items...", False)
+                except:
+                    pass  # Fall back to dynamic detection
+            elif selected_source == "CSV File":
+                temp_file_to_cleanup = input_source
+                # For CSV file, we can estimate total tracks from CSV items
+                try:
+                    csv_path = self.csv_field.stringValue().strip()
+                    import csv
+                    csv_items = []
+                    with open(csv_path, 'r', newline='', encoding='utf-8') as csvfile:
+                        reader = csv.DictReader(csvfile)
+                        for row in reader:
+                            if 'title' in row and 'artist' in row and row['artist'] and row['title']:
+                                csv_items.append(f"{row['artist']} - {row['title']}")
+                            elif 'track' in row and row['track']:
+                                csv_items.append(row['track'])
+                    initial_total_tracks = len(csv_items)
+                    if initial_total_tracks > 0:
+                        # Set initial progress for CSV file
+                        self.performSelectorOnMainThread_withObject_waitUntilDone_("switchToDeterminateProgress:", float(initial_total_tracks), False)
+                        self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", f"Processing {initial_total_tracks} CSV items...", False)
+                except:
+                    pass  # Fall back to dynamic detection
 
-            total_tracks = 0
+            total_tracks = initial_total_tracks
             succeeded_count = 0
             failed_count = 0
             searching_count = 0
@@ -951,8 +1199,15 @@ This means: Try to find FLAC files first, but accept MP3 files if they're at lea
                     self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", "Loading playlist...", False)
                 elif line.startswith("Login"):
                     self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", "Logging in...", False)
+                elif selected_source == "Wishlist" and "Loading" in line:
+                    # For wishlist, show loading status when processing the list
+                    self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", "Loading wishlist...", False)
+                elif selected_source == "CSV File" and "Processing" in line:
+                    # For CSV file, show processing status
+                    self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", "Processing CSV items...", False)
 
                 # Get total tracks and set the max progress bar value
+                # Handle both playlist and wishlist formats
                 total_match = re.search(r'Downloading (\d+) tracks:', line)
                 if total_match:
                     total_tracks = int(total_match.group(1))
@@ -960,11 +1215,30 @@ This means: Try to find FLAC files first, but accept MP3 files if they're at lea
                         max_steps = float(total_tracks)
                         self.performSelectorOnMainThread_withObject_waitUntilDone_("switchToDeterminateProgress:", max_steps, False)
                     continue
+                
+                # For wishlist, if we haven't found total tracks yet, try to estimate from wishlist items
+                if selected_source == "Wishlist" and total_tracks == 0:
+                    # Try to get total tracks from wishlist processing messages
+                    wishlist_total_match = re.search(r'Processing (\d+) items', line)
+                    if wishlist_total_match:
+                        total_tracks = int(wishlist_total_match.group(1))
+                        if total_tracks > 0:
+                            max_steps = float(total_tracks)
+                            self.performSelectorOnMainThread_withObject_waitUntilDone_("switchToDeterminateProgress:", max_steps, False)
+                        continue
 
                 # --- Track successful downloads for progress ---
                 if line.startswith("Searching:"):
                     searching_count += 1
                     # Don't update progress bar during searching phase
+                    continue
+                elif (selected_source == "Wishlist" or selected_source == "CSV File") and "Searching for" in line:
+                    # For wishlist and CSV file, show when we start searching for individual items
+                    if total_tracks > 0:
+                        current_step = float(searching_count + 1)
+                        status_message = f"Searching item {searching_count + 1}/{total_tracks}"
+                        self.performSelectorOnMainThread_withObject_waitUntilDone_("updateProgressAndStatus:", (current_step, status_message), False)
+                    searching_count += 1
                     continue
                 
                 elif line.startswith("Succeeded:"):
@@ -1025,6 +1299,14 @@ This means: Try to find FLAC files first, but accept MP3 files if they're at lea
             self.current_process = None
             self.download_running = False
             
+            # Clean up temporary wishlist file if it exists
+            if 'temp_file_to_cleanup' in locals() and temp_file_to_cleanup:
+                try:
+                    import os
+                    os.unlink(temp_file_to_cleanup)
+                except Exception as e:
+                    print(f"Error cleaning up temp file: {e}")
+            
             # Re-enable the start button and disable stop button
             self.performSelectorOnMainThread_withObject_waitUntilDone_(
                 "enableStartButton:", True, False
@@ -1064,14 +1346,14 @@ This means: Try to find FLAC files first, but accept MP3 files if they're at lea
                 
                 # Load source selection
                 selected_source = data.get('selected_source', 'YouTube Playlist')
-                if selected_source in ["YouTube Playlist", "Spotify Playlist", "Wishlist"]:
+                if selected_source in ["YouTube Playlist", "Spotify Playlist", "Wishlist", "CSV File"]:
                     self.source_popup.selectItemWithTitle_(selected_source)
                     self.sourceChanged_(None)  # Update UI visibility
                 
                 # Load URLs
                 self.playlist_field.setStringValue_(data.get('playlist_url', ''))
                 self.spotify_field.setStringValue_(data.get('spotify_url', ''))
-                self.wishlist_field.setStringValue_(data.get('wishlist_file', ''))
+                self.csv_field.setStringValue_(data.get('csv_file_path', ''))
                 
                 self.user_field.setStringValue_(data.get('username', ''))
                 self.path_field.setStringValue_(data.get('download_path', ''))
@@ -1105,6 +1387,10 @@ This means: Try to find FLAC files first, but accept MP3 files if they're at lea
                     self.strict_min_bitrate_field.setStringValue_(str(data['strict_min_bitrate']))
                 if 'strict_max_bitrate' in data:
                     self.strict_max_bitrate_field.setStringValue_(str(data['strict_max_bitrate']))
+                
+                # Load wishlist mode
+                wishlist_mode = data.get('wishlist_mode', False)
+                self.wishlist_mode_checkbox.setState_(wishlist_mode)
             except Exception:
                 pass
 
@@ -1120,7 +1406,7 @@ This means: Try to find FLAC files first, but accept MP3 files if they're at lea
             'selected_source': self.source_popup.titleOfSelectedItem(),
             'playlist_url': self.playlist_field.stringValue(),
             'spotify_url': self.spotify_field.stringValue(),
-            'wishlist_file': self.wishlist_field.stringValue(),
+            'csv_file_path': self.csv_field.stringValue(),
             'username': self.user_field.stringValue(),
             'download_path': self.path_field.stringValue(),
             'remember_password': remember_password,
@@ -1132,6 +1418,7 @@ This means: Try to find FLAC files first, but accept MP3 files if they're at lea
             'pref_max_bitrate': self.pref_max_bitrate_field.stringValue(),
             'strict_min_bitrate': self.strict_min_bitrate_field.stringValue(),
             'strict_max_bitrate': self.strict_max_bitrate_field.stringValue(),
+            'wishlist_mode': bool(self.wishlist_mode_checkbox.state()),
         }
         
         # Only save password if remember password is checked
@@ -1179,6 +1466,15 @@ This means: Try to find FLAC files first, but accept MP3 files if they're at lea
             success = processor.process_csv_file(str(index_file))
 
             if success:
+                # Process wishlist if mode is enabled
+                if self.wishlist_mode_checkbox.state():
+                    log_path = index_file.parent / 'log.csv'
+                    if log_path.exists():
+                        # Add failed downloads to wishlist
+                        self.__processFailedDownloadsToWishlist(str(log_path))
+                        # Remove successful downloads from wishlist
+                        self.__removeSuccessfulDownloadsFromWishlist(str(log_path))
+                
                 self.performSelectorOnMainThread_withObject_waitUntilDone_(
                     "updateStatusText:", "Complete", False
                 )
@@ -1242,6 +1538,14 @@ This means: Try to find FLAC files first, but accept MP3 files if they're at lea
             # Append missing tracks to the processed log file
             self.__append_missing_tracks_to_processed_log(log_file, missing_tracks)
             
+            # Process wishlist if mode is enabled
+            if self.wishlist_mode_checkbox.state():
+                if log_file.exists():
+                    # Add failed downloads to wishlist
+                    self.__processFailedDownloadsToWishlist(str(log_file))
+                    # Remove successful downloads from wishlist
+                    self.__removeSuccessfulDownloadsFromWishlist(str(log_file))
+            
             self.performSelectorOnMainThread_withObject_waitUntilDone_(
                 "updateStatusText:", "Stopped", False
             )
@@ -1263,7 +1567,12 @@ This means: Try to find FLAC files first, but accept MP3 files if they're at lea
                 playlist_url = self.spotify_field.stringValue().strip()
                 cmd = [str(self.sldl_path), playlist_url, '--print', 'tracks']
             else:  # Wishlist
-                wishlist_file = self.wishlist_field.stringValue().strip()
+                # Create temporary wishlist file in sldl format
+                temp_wishlist_file = self.__createSldlWishlistFile()
+                if not temp_wishlist_file:
+                    return []
+                
+                wishlist_file = temp_wishlist_file
                 cmd = [str(self.sldl_path), wishlist_file, '--input-type', 'list', '--print', 'tracks']
             
             result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
@@ -1803,6 +2112,351 @@ This means: Try to find FLAC files first, but accept MP3 files if they're at lea
                     
         except Exception as e:
             raise Exception(f"Failed to write wishlist file: {e}")
+
+    def viewWishlist_(self, sender):
+        """Show wishlist contents in a popup dialog."""
+        try:
+            # Ensure we're on the main thread
+            if not NSThread.isMainThread():
+                self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "viewWishlist:", sender, False
+                )
+                return
+            
+            wishlist_items = self.__loadWishlistItems()
+            if not wishlist_items:
+                self.showAlert_message_("Wishlist", "Your wishlist is empty.")
+                return
+            
+            # Create content
+            content = ""
+            for item in wishlist_items:
+                content += f"{item}\n"
+            
+            # Create alert with scrollable text
+            alert = NSAlert.alloc().init()
+            alert.setMessageText_("Wishlist Contents")
+            alert.setInformativeText_(content)
+            alert.addButtonWithTitle_("Close")
+            
+            # Set alert style to informational
+            alert.setAlertStyle_(1)  # NSAlertStyleInformational
+            
+            alert.runModal()
+                
+        except Exception as e:
+            self.showAlert_message_("Error", f"Failed to view wishlist: {str(e)}")
+
+    def exportWishlist_(self, sender):
+        """Handle export button click from main wishlist controls."""
+        self.__exportWishlistToCSV()
+
+    def clearWishlist_(self, sender):
+        """Handle clear button click with confirmation dialog."""
+        try:
+            # Show confirmation dialog
+            alert = NSAlert.alloc().init()
+            alert.setMessageText_("Clear Wishlist")
+            alert.setInformativeText_("Are you sure? This will irreversibly delete all entries from your wishlist.")
+            alert.addButtonWithTitle_("Cancel")
+            alert.addButtonWithTitle_("Clear")
+            
+            # Set alert style to warning
+            alert.setAlertStyle_(2)  # NSAlertStyleWarning
+            
+            response = alert.runModal()
+            if response == NSAlertSecondButtonReturn:  # Clear button
+                # Clear the wishlist
+                self.__saveWishlistItems([])
+                self.showAlert_message_("Success", "Wishlist has been cleared.")
+                
+        except Exception as e:
+            self.showAlert_message_("Error", f"Failed to clear wishlist: {str(e)}")
+
+    def importWishlist_(self, sender):
+        """Import tracks from a CSV file to the wishlist."""
+        try:
+            # Ask user to select CSV file
+            panel = NSOpenPanel.openPanel()
+            panel.setCanChooseFiles_(True)
+            panel.setCanChooseDirectories_(False)
+            panel.setAllowsMultipleSelection_(False)
+            panel.setTitle_("Import Wishlist from CSV")
+            panel.setAllowedFileTypes_(["csv"])
+            
+            if panel.runModal() == NSModalResponseOK:
+                csv_path = panel.URL().path()
+                imported_count = self.__importWishlistFromCSV(csv_path)
+                self.showAlert_message_("Success", f"{imported_count} songs imported to wishlist")
+                
+        except Exception as e:
+            self.showAlert_message_("Error", f"Failed to import wishlist: {str(e)}")
+
+    def __loadWishlistItems(self):
+        """Load wishlist items from CSV file."""
+        items = []
+        if WISHLIST_FILE.exists():
+            try:
+                import csv
+                with open(WISHLIST_FILE, 'r', newline='', encoding='utf-8') as csvfile:
+                    reader = csv.DictReader(csvfile)
+                    for row in reader:
+                        if 'title' in row and 'artist' in row:
+                            items.append(f"{row['artist']} - {row['title']}")
+                        elif 'track' in row:
+                            items.append(row['track'])
+            except Exception as e:
+                print(f"Error loading wishlist: {e}")
+        return items
+
+    def __createSldlWishlistFile(self):
+        """Create a temporary wishlist file in the format sldl expects."""
+        try:
+            wishlist_items = self.__loadWishlistItems()
+            if not wishlist_items:
+                return None
+            
+            # Create a temporary file with proper sldl list format
+            import tempfile
+            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
+            
+            for item in wishlist_items:
+                if ' - ' in item:
+                    artist, title = item.split(' - ', 1)
+                    # Format: "artist=Artist,title=Title"     ""     ""
+                    formatted_line = f'"artist={artist},title={title}"\t""\t""\n'
+                else:
+                    # For items without artist-title format, use as search string
+                    formatted_line = f'"{item}"\t""\t""\n'
+                
+                temp_file.write(formatted_line)
+            
+            temp_file.close()
+            return temp_file.name
+            
+        except Exception as e:
+            print(f"Error creating sldl wishlist file: {e}")
+            return None
+
+    def __createSldlWishlistFileFromCSV(self):
+        """Create a temporary wishlist file from CSV in the format sldl expects."""
+        try:
+            csv_path = self.csv_field.stringValue().strip()
+            if not csv_path:
+                return None
+            
+            # Read CSV file and extract items
+            import csv
+            items = []
+            
+            with open(csv_path, 'r', newline='', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                for row in reader:
+                    if 'title' in row and 'artist' in row and row['artist'] and row['title']:
+                        items.append(f"{row['artist']} - {row['title']}")
+                    elif 'track' in row and row['track']:
+                        items.append(row['track'])
+            
+            if not items:
+                return None
+            
+            # Create a temporary file with proper sldl list format
+            import tempfile
+            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
+            
+            for item in items:
+                if ' - ' in item:
+                    artist, title = item.split(' - ', 1)
+                    # Format: "artist=Artist,title=Title"     ""     ""
+                    formatted_line = f'"artist={artist},title={title}"\t""\t""\n'
+                else:
+                    # For items without artist-title format, use as search string
+                    formatted_line = f'"{item}"\t""\t""\n'
+                
+                temp_file.write(formatted_line)
+            
+            temp_file.close()
+            return temp_file.name
+            
+        except Exception as e:
+            print(f"Error creating sldl wishlist file from CSV: {e}")
+            return None
+
+    def __saveWishlistItems(self, items):
+        """Save wishlist items to CSV file."""
+        try:
+            import csv
+            with open(WISHLIST_FILE, 'w', newline='', encoding='utf-8') as csvfile:
+                fieldnames = ['artist', 'title']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                
+                for item in items:
+                    if ' - ' in item:
+                        artist, title = item.split(' - ', 1)
+                        writer.writerow({'artist': artist, 'title': title})
+                    else:
+                        writer.writerow({'artist': '', 'title': item})
+        except Exception as e:
+            raise Exception(f"Failed to save wishlist: {e}")
+
+    def __addToWishlist(self, items):
+        """Add items to wishlist without duplicates."""
+        try:
+            existing_items = set(self.__loadWishlistItems())
+            new_items = set(items)
+            
+            # Add new items that aren't already in the wishlist
+            items_to_add = new_items - existing_items
+            if items_to_add:
+                all_items = list(existing_items) + list(items_to_add)
+                self.__saveWishlistItems(all_items)
+                return len(items_to_add)
+            return 0
+        except Exception as e:
+            print(f"Error adding to wishlist: {e}")
+            return 0
+
+    def __removeFromWishlist(self, items):
+        """Remove items from wishlist."""
+        try:
+            existing_items = self.__loadWishlistItems()
+            items_to_remove = set(items)
+            
+            # Remove items that match
+            remaining_items = [item for item in existing_items if item not in items_to_remove]
+            
+            if len(remaining_items) != len(existing_items):
+                self.__saveWishlistItems(remaining_items)
+                return len(existing_items) - len(remaining_items)
+            return 0
+        except Exception as e:
+            print(f"Error removing from wishlist: {e}")
+            return 0
+
+    def __exportWishlistToCSV(self):
+        """Export wishlist to a user-selected CSV file."""
+        try:
+            wishlist_items = self.__loadWishlistItems()
+            if not wishlist_items:
+                self.showAlert_message_("Error", "No items in wishlist to export.")
+                return
+            
+            # Ask user for export location using save panel
+            panel = NSSavePanel.savePanel()
+            panel.setTitle_("Export Wishlist")
+            panel.setAllowedFileTypes_(["csv"])
+            panel.setNameFieldStringValue_("wishlist_export.csv")
+            
+            if panel.runModal() == NSModalResponseOK:
+                export_path = panel.URL().path()
+                
+                # Save directly to user-selected location
+                try:
+                    import csv
+                    with open(export_path, 'w', newline='', encoding='utf-8') as csvfile:
+                        fieldnames = ['artist', 'title']
+                        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                        writer.writeheader()
+                        
+                        for item in wishlist_items:
+                            if ' - ' in item:
+                                artist, title = item.split(' - ', 1)
+                                writer.writerow({'artist': artist, 'title': title})
+                            else:
+                                writer.writerow({'artist': '', 'title': item})
+                    
+                    self.showAlert_message_("Success", f"Exported {len(wishlist_items)} items to wishlist file.")
+                except Exception as e:
+                    self.showAlert_message_("Error", f"Failed to export wishlist: {str(e)}")
+                
+        except Exception as e:
+            self.showAlert_message_("Error", f"Failed to export wishlist: {str(e)}")
+
+    def __importWishlistFromCSV(self, csv_path):
+        """Import tracks from CSV file to wishlist."""
+        try:
+            import csv
+            items_to_import = []
+            
+            with open(csv_path, 'r', newline='', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                for row in reader:
+                    if 'title' in row and 'artist' in row and row['artist'] and row['title']:
+                        items_to_import.append(f"{row['artist']} - {row['title']}")
+                    elif 'track' in row and row['track']:
+                        items_to_import.append(row['track'])
+            
+            if items_to_import:
+                return self.__addToWishlist(items_to_import)
+            return 0
+            
+        except Exception as e:
+            raise Exception(f"Failed to import CSV: {e}")
+
+    def __processFailedDownloadsToWishlist(self, log_path):
+        """Process failed downloads from log.csv and add to wishlist."""
+        try:
+            import csv
+            failed_items = []
+            
+            with open(log_path, 'r', newline='', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                for row in reader:
+                    # Check if this is a failed download
+                    state = row.get('state', '')
+                    state_desc = row.get('state_description', '')
+                    failure_desc = row.get('failure_description', '')
+                    
+                    if (state == '2' or state_desc == 'Failed' or 
+                        'Failed' in failure_desc or 'cancelled' in failure_desc.lower()):
+                        
+                        # Extract artist and title
+                        artist = row.get('artist', '')
+                        title = row.get('title', '')
+                        
+                        if artist and title:
+                            failed_items.append(f"{artist} - {title}")
+            
+            if failed_items:
+                added_count = self.__addToWishlist(failed_items)
+                if added_count > 0:
+                    self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                        "appendOutput:", f"\n📝 Added {added_count} failed downloads to wishlist.\n", False
+                    )
+                    
+        except Exception as e:
+            print(f"Error processing failed downloads to wishlist: {e}")
+
+    def __removeSuccessfulDownloadsFromWishlist(self, log_path):
+        """Remove successfully downloaded tracks from wishlist."""
+        try:
+            import csv
+            successful_items = []
+            
+            with open(log_path, 'r', newline='', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                for row in reader:
+                    # Check if this is a successful download
+                    state = row.get('state', '')
+                    state_desc = row.get('state_description', '')
+                    
+                    if (state == '1' or state_desc == 'Downloaded'):
+                        artist = row.get('artist', '')
+                        title = row.get('title', '')
+                        
+                        if artist and title:
+                            successful_items.append(f"{artist} - {title}")
+            
+            if successful_items:
+                removed_count = self.__removeFromWishlist(successful_items)
+                if removed_count > 0:
+                    self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                        "appendOutput:", f"\n✅ Removed {removed_count} successful downloads from wishlist.\n", False
+                    )
+                    
+        except Exception as e:
+            print(f"Error removing successful downloads from wishlist: {e}")
 
     def showUpdateAlert_(self, latest_version):
         """Show update alert dialog on main thread."""

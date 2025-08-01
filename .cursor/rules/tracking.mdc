@@ -14,13 +14,13 @@ There are three log files:
 **CRITICAL - STEPS FOR USAGE:**
 
 1. ALWAYS read and reference both these logs at the beginning of every user interaction to understand the current project state and recent changes.
-2. Update the change log (how to do this explained below) just before you responding to the user with completion status. Include the date and time pulled from the system, type of change, description, and impact for each entry, but keep it very succint.
+2. Update the change log (how to do this explained below) just before you responding to the user with completion status. Include the type of change, description, and impact for each entry, but keep it very succint.
 
 **EFFICIENT CHANGE LOGGING APPROACH:**
 
 1. Only significant operations should be logged (see below for definitions)
-2. Cursor should initially write to /.cursor/logs/changes-scratch.txt
-3. Cursor should then run /.cursor/logs/append-changes.sh - this automates the process of adding the change to changes.txt and clearing changes-scratch.txt
+2. Cursor should initially write to /.cursor/logs/changes-scratch.txt - don't add date/time here
+3. Cursor should then run /.cursor/logs/append-changes.sh - this pulls the system date/time for accuracy, and automates the process of adding the change to changes.txt and clearing changes-scratch.txt
 
 **A "significant operation" includes:**
 
