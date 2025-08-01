@@ -30,7 +30,8 @@ class SLDLCSVProcessor:
         2: "OutOfDownloadRetries",
         3: "NoSuitableFileFound",
         4: "AllDownloadsFailed",
-        5: "Other"
+        5: "Other",
+        6: "Download cancelled by user"
     }
     
     def __init__(self):
@@ -87,9 +88,13 @@ class SLDLCSVProcessor:
                         row['state_description'] = self.get_state_description(state_code)
                     
                     # Add failure description
-                    if 'failurereason' in row and row['failurereason'].isdigit():
-                        failure_code = int(row['failurereason'])
-                        row['failure_description'] = self.get_failure_description(failure_code)
+                    if 'failurereason' in row:
+                        if row['failurereason'].isdigit():
+                            failure_code = int(row['failurereason'])
+                            row['failure_description'] = self.get_failure_description(failure_code)
+                        else:
+                            # Handle string-based failure reasons (like "Download cancelled by user")
+                            row['failure_description'] = row['failurereason']
                     
                     rows.append(row)
             
