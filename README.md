@@ -338,7 +338,9 @@ If you encounter "Failed to start listening" errors:
 
 ## License
 
-This project is open source. See the LICENSE file for details.
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
+
+This project bundles and distributes the [slsk-batchdl](https://github.com/fiso64/slsk-batchdl) (`sldl`) tool, which is also licensed under GNU GPL v3.0. The GPL v3.0 license ensures that this software and any derivatives remain free and open source.
 
 ## Disclaimer
 
