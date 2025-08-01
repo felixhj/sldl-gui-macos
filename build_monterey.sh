@@ -118,16 +118,17 @@ install_dependencies() {
 download_slsk_batchdl() {
     log_info "Downloading slsk-batchdl..."
     
-    # Get latest release URL
-    local release_url=$(curl -s https://api.github.com/repos/fiso64/slsk-batchdl/releases/latest | grep "browser_download_url.*osx-$ARCH.zip" | cut -d'"' -f4)
+    # Get latest tag and construct download URL directly
+    local latest_tag=$(curl -s https://api.github.com/repos/fiso64/slsk-batchdl/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
     
-    if [ -z "$release_url" ]; then
-        log_error "Could not find slsk-batchdl release for $ARCH"
+    if [ -z "$latest_tag" ]; then
+        log_error "Could not get latest slsk-batchdl tag"
         exit 1
     fi
     
-    log_info "Downloading from: $release_url"
-    curl -L -o "sldl_osx-$ARCH.zip" "$release_url"
+    local download_url="https://github.com/fiso64/slsk-batchdl/releases/download/$latest_tag/sldl_osx-$ARCH.zip"
+    log_info "Downloading from: $download_url"
+    curl -L -o "sldl_osx-$ARCH.zip" "$download_url"
     
     # Extract
     log_info "Extracting slsk-batchdl..."
