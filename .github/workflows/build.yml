@@ -41,28 +41,98 @@ jobs:
 
       - name: Download and Extract slsk-batchdl
         run: |
-          # Get latest tag and construct download URL directly
-          LATEST_TAG=$(curl -s https://api.github.com/repos/fiso64/slsk-batchdl/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
-          
-          if [ -z "$LATEST_TAG" ]; then
-            echo "::error::Could not get latest slsk-batchdl tag"
-            exit 1
+          # Method 1: Try with GitHub token for authenticated API access
+          if [ -n "${{ github.token }}" ]; then
+            echo "Attempting authenticated download..."
+            LATEST_TAG=$(curl -s -H "Authorization: token ${{ github.token }}" \
+              https://api.github.com/repos/fiso64/slsk-batchdl/releases/latest | \
+              jq -r '.tag_name' 2>/dev/null)
           fi
-          
+
+          # Method 2: Fallback to unauthenticated API (may hit rate limits)
+          if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "null" ]; then
+            echo "Falling back to unauthenticated API..."
+            LATEST_TAG=$(curl -s https://api.github.com/repos/fiso64/slsk-batchdl/releases/latest | \
+              jq -r '.tag_name' 2>/dev/null)
+          fi
+
+          # Method 3: Hardcoded fallback version if API fails completely
+          if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "null" ]; then
+            echo "API calls failed, using hardcoded fallback version..."
+            LATEST_TAG="v2.4.7"
+          fi
+
+          echo "Using sldl version: $LATEST_TAG"
+
+          # Construct download URL
           DOWNLOAD_URL="https://github.com/fiso64/slsk-batchdl/releases/download/$LATEST_TAG/sldl_osx-${{ matrix.arch }}.zip"
           echo "Downloading from: $DOWNLOAD_URL"
-          
-          curl -L -o "sldl_osx-${{ matrix.arch }}.zip" "$DOWNLOAD_URL"
+
+          # Download with retry logic
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if curl -L -f -o "sldl_osx-${{ matrix.arch }}.zip" "$DOWNLOAD_URL"; then
+              echo "Download successful!"
+              break
+            else
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              echo "Download attempt $RETRY_COUNT failed. Retrying in 5 seconds..."
+              sleep 5
+            fi
+          done
+
+          if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+            echo "::error::Failed to download sldl after $MAX_RETRIES attempts"
+            exit 1
+          fi
 
           # Extract and organize
+          echo "Extracting sldl..."
           unzip -o "sldl_osx-${{ matrix.arch }}.zip"
           mkdir -p bin
           mv sldl bin/
           chmod +x bin/sldl
 
           # Verify the binary
+          echo "Verifying sldl binary..."
           ls -la bin/
-          bin/sldl --version
+          if ! bin/sldl --version; then
+            echo "::error::sldl binary verification failed"
+            exit 1
+          fi
+
+          echo "sldl download and setup completed successfully"
+
+      # Alternative approach using dedicated GitHub Action (commented out for now)
+      # - name: Download slsk-batchdl using GitHub Action
+      #   uses: robinraju/release-downloader@v1.9
+      #   with:
+      #     repository: "fiso64/slsk-batchdl"
+      #     tag: "latest"
+      #     fileName: "sldl_osx-${{ matrix.arch }}.zip"
+      #     tarBall: false
+      #     zipBall: false
+      #     out-file-path: "."
+      #     access-token: ${{ github.token }}
+      #
+      # - name: Extract and Setup slsk-batchdl
+      #   run: |
+      #     echo "Extracting sldl..."
+      #     unzip -o "sldl_osx-${{ matrix.arch }}.zip"
+      #     mkdir -p bin
+      #     mv sldl bin/
+      #     chmod +x bin/sldl
+      #
+      #     echo "Verifying sldl binary..."
+      #     ls -la bin/
+      #     if ! bin/sldl --version; then
+      #       echo "::error::sldl binary verification failed"
+      #       exit 1
+      #     fi
+      #
+      #     echo "sldl download and setup completed successfully"
 
       - name: Import Signing Certificate
         env:
