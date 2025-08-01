@@ -1,12 +1,22 @@
-# Building sldl-gui for macOS for macOS 12 (Monterey)
+# Building sldl-gui for macOS 12 (Monterey)
 
-Since GitHub Actions no longer supports macOS 12 runners, the Monterey build needs to be created locally. This guide will walk you through the process.
+Since GitHub Actions no longer supports macOS 12 runners, the Monterey build needs to be created locally. This guide will walk you through the process of building the latest version of sldl-gui for macOS 12 (Monterey).
 
 ## Prerequisites
 
 1. **macOS 12 (Monterey)** - You must be running macOS 12 to build the Monterey-compatible version
 2. **Homebrew** - For installing dependencies
 3. **GitHub CLI** - For uploading releases (optional, for release management)
+
+## Latest Features
+
+The current build includes the following features:
+
+- **Download Control**: Stop ongoing downloads at any time with the integrated stop button
+- **Real-time Progress Tracking**: Accurate step counting and status updates
+- **Automated CSV Processing**: Automatic processing of download logs with human-readable descriptions
+- **Settings Persistence**: Automatic saving and restoration of user preferences
+- **Self-Contained**: Includes the `sldl` dependency bundled with the application
 
 ## Quick Start
 
@@ -108,17 +118,17 @@ After building, you can upload the DMG to a GitHub release:
 
 ```bash
 # Upload to an existing release
-./upload_release.sh v1.1.0
+./upload_release.sh v0.3.6
 ```
 
 Or manually:
 
 ```bash
 # Create a new release (if it doesn't exist)
-gh release create v1.1.0 --draft --title "Release v1.1.0" --notes "Release v1.1.0 with Monterey support"
+gh release create v0.3.6 --draft --title "Release v0.3.6" --notes "Release v0.3.6 with download stop functionality and Monterey support"
 
 # Upload the DMG
-gh release upload v1.1.0 sldl-gui-x64-monterey.dmg
+gh release upload v0.3.6 sldl-gui-x64-monterey.dmg
 ```
 
 ## Troubleshooting
@@ -162,6 +172,15 @@ If the build fails, check:
 2. All dependencies are installed
 3. You have sufficient disk space
 4. Your internet connection is stable
+
+### Download Control
+
+The application now includes a stop button that allows users to interrupt ongoing downloads:
+
+- **Stop Button**: Located next to the "Start Download" button
+- **Graceful Termination**: Attempts to terminate the process gracefully with a 5-second timeout
+- **Force Kill**: If graceful termination fails, the process is forcefully killed
+- **Thread Safety**: All UI updates are performed on the main thread to prevent crashes
 
 ## Output Files
 

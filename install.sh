@@ -61,9 +61,32 @@ main() {
     OS_SUFFIX="sonoma"
   fi
   
-  # Try the version-specific DMG naming pattern
-  ASSET_NAME="sldl-gui-${ARCH}-${OS_SUFFIX}.dmg"
-  DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/latest/download/${ASSET_NAME}"
+  # Get the latest release information from GitHub API
+  info "Fetching latest release information..."
+  LATEST_RELEASE=$(curl -s "https://api.github.com/repos/${GITHUB_REPO}/releases/latest")
+  
+  if [ $? -ne 0 ]; then
+    fail "Failed to fetch release information from GitHub."
+  fi
+  
+  # Extract the version from the release tag
+  VERSION=$(echo "$LATEST_RELEASE" | grep -o '"tag_name": "v[^"]*"' | cut -d'"' -f4 | sed 's/^v//')
+  
+  if [ -z "$VERSION" ]; then
+    fail "Could not determine the latest version from GitHub."
+  fi
+  
+  info "Latest version: $VERSION"
+  
+  # Find the correct DMG asset for this architecture and OS
+  ASSET_NAME="sldl-gui-${ARCH}-${OS_SUFFIX}-v${VERSION}.dmg"
+  
+  # Get the download URL for the specific asset
+  DOWNLOAD_URL=$(echo "$LATEST_RELEASE" | grep -o "\"browser_download_url\": \"[^\"]*${ASSET_NAME}[^\"]*\"" | cut -d'"' -f4)
+  
+  if [ -z "$DOWNLOAD_URL" ]; then
+    fail "Could not find the download URL for asset '$ASSET_NAME' in the latest release."
+  fi
   
   info "Downloading from: $DOWNLOAD_URL"
 

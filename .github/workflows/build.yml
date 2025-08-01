@@ -89,6 +89,20 @@ jobs:
           # Allow codesign to access the keychain
           security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
 
+      - name: Extract version from tag
+        run: |
+          # Extract version from git tag (remove 'v' prefix)
+          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION=${VERSION#v}
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Building version: $VERSION"
+
+      - name: Update version in application
+        run: |
+          # Update the APP_VERSION constant in the Python file
+          sed -i '' "s/APP_VERSION = \".*\"/APP_VERSION = \"$VERSION\"/" sldl-gui-macos.py
+          echo "Updated APP_VERSION to $VERSION"
+
       - name: Build the application with PyInstaller
         run: |
           pyinstaller --noconfirm --windowed --name="sldl-gui" \
@@ -129,7 +143,7 @@ jobs:
             --icon "uninstall.command" 400 190 \
             --hide-extension "uninstall.command" \
             --app-drop-link 600 185 \
-            "sldl-gui-${{ matrix.arch }}-$OS_VERSION.dmg" \
+            "sldl-gui-${{ matrix.arch }}-$OS_VERSION-v${{ env.VERSION }}.dmg" \
             "$DMG_TEMP_DIR"
 
           # Clean up temp directory
