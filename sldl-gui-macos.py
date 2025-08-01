@@ -717,11 +717,16 @@ class AppDelegate(NSObject):
             import urllib.request
             import urllib.error
             
-            guides_url = "https://raw.githubusercontent.com/felixb/sldl-gui-macos/main/guides.txt"
+            guides_url = "https://raw.githubusercontent.com/felixhj/sldl-gui-macos/main/guides.txt"
             
             try:
+                # Create SSL context that doesn't verify certificates (for macOS compatibility)
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+                
                 # Fetch guides from GitHub
-                with urllib.request.urlopen(guides_url) as response:
+                with urllib.request.urlopen(guides_url, context=ssl_context) as response:
                     guides_text = response.read().decode('utf-8')
                 
                 # Save to local file (overwrite if exists)
@@ -754,11 +759,16 @@ class AppDelegate(NSObject):
             import urllib.request
             import urllib.error
             
-            bugs_url = "https://raw.githubusercontent.com/felixb/sldl-gui-macos/main/bugs-to-fix.txt"
+            bugs_url = "https://raw.githubusercontent.com/felixhj/sldl-gui-macos/main/bugs-to-fix.txt"
             
             try:
+                # Create SSL context that doesn't verify certificates (for macOS compatibility)
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+                
                 # Fetch bugs from GitHub
-                with urllib.request.urlopen(bugs_url) as response:
+                with urllib.request.urlopen(bugs_url, context=ssl_context) as response:
                     bugs_text = response.read().decode('utf-8')
                 
                 # Save to local file (overwrite if exists)

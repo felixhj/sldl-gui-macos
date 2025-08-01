@@ -191,9 +191,12 @@ create_dmg() {
     # Copy the uninstall script to the temp directory
     cp "uninstall.command" "$DMG_TEMP_DIR/"
     
+    # Create Applications folder alias pointing to user's Applications folder
+    ln -sf "$HOME/Applications" "$DMG_TEMP_DIR/Applications"
+    
     # Create DMG with both app and uninstall script
     create-dmg \
-        --volname "sldl-gui Installer" \
+        --volname "sldl-gui-$ARCH-monterey-v$VERSION" \
         --window-pos 200 120 \
         --window-size 800 400 \
         --icon-size 100 \
@@ -201,7 +204,8 @@ create_dmg() {
         --hide-extension "sldl-gui.app" \
         --icon "uninstall.command" 400 190 \
         --hide-extension "uninstall.command" \
-        --app-drop-link 600 185 \
+        --icon "Applications" 600 185 \
+        --hide-extension "Applications" \
         --hdiutil-quiet \
         "sldl-gui-$ARCH-monterey-v$VERSION.dmg" \
         "$DMG_TEMP_DIR"
