@@ -8,6 +8,7 @@ import sys
 import re
 import urllib.request
 import urllib.error
+import urllib.parse
 import ssl
 import datetime
 from pathlib import Path
@@ -161,19 +162,25 @@ class AppDelegate(NSObject):
         )
         extra_tools_menu.addItem_(output_csv_item)
         
-        # Add separator
-        extra_tools_menu.addItem_(NSMenuItem.separatorItem())
-        
-        # Add Wishlist items
-        export_failed_to_wishlist_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Export Failed Downloads to Wishlist", "exportFailedToWishlist:", ""
+        # Create Bugs menu
+        bugs_menu_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Bugs", None, ""
         )
-        extra_tools_menu.addItem_(export_failed_to_wishlist_item)
+        main_menu.addItem_(bugs_menu_item)
+        bugs_menu = NSMenu.alloc().initWithTitle_("Bugs")
+        bugs_menu_item.setSubmenu_(bugs_menu)
         
-        open_wishlist_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Open Wishlist File", "openWishlist:", ""
+        # Add Known bugs item
+        known_bugs_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Known bugs", "showKnownBugs:", ""
         )
-        extra_tools_menu.addItem_(open_wishlist_item)
+        bugs_menu.addItem_(known_bugs_item)
+        
+        # Add Report bug item
+        report_bug_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Report bug", "reportBug:", ""
+        )
+        bugs_menu.addItem_(report_bug_item)
         
         # Set the main menu
         NSApp.setMainMenu_(main_menu)
@@ -203,7 +210,7 @@ class AppDelegate(NSObject):
         START_BUTTON_HEIGHT = 32
         LABEL_WIDTH = 200
         FIELD_Y_SPACING = 40
-        SECTION_SPACING = 40
+        SECTION_SPACING = 60
         
         # --- Top-Down Layout ---
         y = view.frame().size.height - PADDING
@@ -402,10 +409,10 @@ class AppDelegate(NSObject):
         view.addSubview_(self.browse_button)
 
         # --- Wishlist Management Section ---
-        y -= FIELD_Y_SPACING
+        y -= SECTION_SPACING
         wishlist_section_label = NSTextField.labelWithString_("Wishlist Management")
         wishlist_section_label.setFrame_(NSMakeRect(PADDING, y, 200, CONTROL_HEIGHT))
-        wishlist_section_label.setFont_(objc.lookUpClass("NSFont").boldSystemFontOfSize_(13))
+        wishlist_section_label.setFont_(objc.lookUpClass("NSFont").systemFontOfSize_(13))
         wishlist_section_label.setAutoresizingMask_(NSViewMinYMargin)
         view.addSubview_(wishlist_section_label)
 
@@ -419,13 +426,13 @@ class AppDelegate(NSObject):
         view.addSubview_(self.wishlist_mode_checkbox)
 
         # View Wishlist button
-        view_wishlist_x = PADDING + 160
+        view_wishlist_x = PADDING + 150
         self.view_wishlist_button = NSButton.alloc().initWithFrame_(NSMakeRect(view_wishlist_x, y, 100, BUTTON_HEIGHT))
         self.view_wishlist_button.setTitle_("View")
         self.view_wishlist_button.setBezelStyle_(NSBezelStyleRounded)
         self.view_wishlist_button.setTarget_(self)
         self.view_wishlist_button.setAction_("viewWishlist:")
-        self.view_wishlist_button.setAutoresizingMask_(NSViewMinXMargin | NSViewMinYMargin)
+        self.view_wishlist_button.setAutoresizingMask_(NSViewMinYMargin)
         view.addSubview_(self.view_wishlist_button)
 
         # Import Wishlist button
@@ -435,7 +442,7 @@ class AppDelegate(NSObject):
         self.import_wishlist_button.setBezelStyle_(NSBezelStyleRounded)
         self.import_wishlist_button.setTarget_(self)
         self.import_wishlist_button.setAction_("importWishlist:")
-        self.import_wishlist_button.setAutoresizingMask_(NSViewMinXMargin | NSViewMinYMargin)
+        self.import_wishlist_button.setAutoresizingMask_(NSViewMinYMargin)
         view.addSubview_(self.import_wishlist_button)
 
         # Export Wishlist button
@@ -445,7 +452,7 @@ class AppDelegate(NSObject):
         self.export_wishlist_button.setBezelStyle_(NSBezelStyleRounded)
         self.export_wishlist_button.setTarget_(self)
         self.export_wishlist_button.setAction_("exportWishlist:")
-        self.export_wishlist_button.setAutoresizingMask_(NSViewMinXMargin | NSViewMinYMargin)
+        self.export_wishlist_button.setAutoresizingMask_(NSViewMinYMargin)
         view.addSubview_(self.export_wishlist_button)
 
         # Clear Wishlist button
@@ -455,27 +462,27 @@ class AppDelegate(NSObject):
         self.clear_wishlist_button.setBezelStyle_(NSBezelStyleRounded)
         self.clear_wishlist_button.setTarget_(self)
         self.clear_wishlist_button.setAction_("clearWishlist:")
-        self.clear_wishlist_button.setAutoresizingMask_(NSViewMinXMargin | NSViewMinYMargin)
+        self.clear_wishlist_button.setAutoresizingMask_(NSViewMinYMargin)
         view.addSubview_(self.clear_wishlist_button)
 
         # --- Audio Format Section ---
         y -= SECTION_SPACING
         format_section_label = NSTextField.labelWithString_("Audio Format & Quality Criteria")
         format_section_label.setFrame_(NSMakeRect(PADDING, y, 300, CONTROL_HEIGHT))
-        format_section_label.setFont_(objc.lookUpClass("NSFont").boldSystemFontOfSize_(13))
+        format_section_label.setFont_(objc.lookUpClass("NSFont").systemFontOfSize_(13))
         format_section_label.setAutoresizingMask_(NSViewMinYMargin)
         view.addSubview_(format_section_label)
 
         y -= FIELD_Y_SPACING
         preferred_header = NSTextField.labelWithString_("Preferred")
         preferred_header.setFrame_(NSMakeRect(PADDING, y, 200, CONTROL_HEIGHT))
-        preferred_header.setFont_(objc.lookUpClass("NSFont").boldSystemFontOfSize_(12))
+        preferred_header.setFont_(objc.lookUpClass("NSFont").systemFontOfSize_(13))
         preferred_header.setAutoresizingMask_(NSViewMinYMargin)
         view.addSubview_(preferred_header)
 
         strict_header = NSTextField.labelWithString_("Mandatory")
         strict_header.setFrame_(NSMakeRect(350, y, 200, CONTROL_HEIGHT))
-        strict_header.setFont_(objc.lookUpClass("NSFont").boldSystemFontOfSize_(12))
+        strict_header.setFont_(objc.lookUpClass("NSFont").systemFontOfSize_(13))
         strict_header.setAutoresizingMask_(NSViewMinYMargin)
         view.addSubview_(strict_header)
 
@@ -660,68 +667,124 @@ class AppDelegate(NSObject):
         self.window.makeKeyAndOrderFront_(None)
 
     def showGuides_(self, sender):
-        """Show comprehensive guides dialog by fetching from GitHub repo."""
-        import urllib.request
-        import urllib.error
-        
-        # GitHub raw URL for guides.txt
-        guides_url = "https://raw.githubusercontent.com/felixb/sldl-gui-macos/main/guides.txt"
+        """Open guides file in the user's default text editor."""
+        import os
+        import subprocess
         
         try:
-            # Fetch guides from GitHub
-            with urllib.request.urlopen(guides_url) as response:
-                guides_text = response.read().decode('utf-8')
-        except urllib.error.URLError as e:
-            # Fallback to local file if GitHub is unavailable
+            # Get the script directory and guides file path
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            guides_path = os.path.join(script_dir, "guides.txt")
+            
+            # Always try to fetch the latest version from GitHub first
+            import urllib.request
+            import urllib.error
+            
+            guides_url = "https://raw.githubusercontent.com/felixb/sldl-gui-macos/main/guides.txt"
+            
             try:
-                import os
-                script_dir = os.path.dirname(os.path.abspath(__file__))
-                guides_path = os.path.join(script_dir, "guides.txt")
-                with open(guides_path, 'r', encoding='utf-8') as f:
-                    guides_text = f.read()
-            except FileNotFoundError:
-                guides_text = "Unable to load guides. Please check your internet connection or visit the GitHub repository."
+                # Fetch guides from GitHub
+                with urllib.request.urlopen(guides_url) as response:
+                    guides_text = response.read().decode('utf-8')
+                
+                # Save to local file (overwrite if exists)
+                with open(guides_path, 'w', encoding='utf-8') as f:
+                    f.write(guides_text)
+                
+                # Open the downloaded file
+                subprocess.run(["open", guides_path], check=True)
+                
+            except (urllib.error.URLError, Exception) as e:
+                # If GitHub fails, try to use local file if it exists
+                if os.path.exists(guides_path):
+                    subprocess.run(["open", guides_path], check=True)
+                else:
+                    # Show error if both GitHub and local file fail
+                    self.showAlert_message_("Error", f"Unable to load guides: {str(e)}\n\nPlease check your internet connection or visit the GitHub repository.")
+                    
+        except subprocess.CalledProcessError as e:
+            self.showAlert_message_("Error", f"Failed to open guides file: {str(e)}")
         except Exception as e:
-            guides_text = f"Error loading guides: {str(e)}"
+            self.showAlert_message_("Error", f"Unexpected error: {str(e)}")
+
+    def showKnownBugs_(self, sender):
+        """Open bugs-to-fix.txt file in the user's default text editor."""
+        import os
+        import subprocess
         
-        # Create a larger window for the guides
-        guides_window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(100.0, 100.0, 800.0, 600.0),
-            NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable,
-            NSBackingStoreBuffered,
-            False
-        )
-        guides_window.setTitle_("SLDL GUI Guides")
-        guides_window.center()
+        try:
+            # Get the script directory and bugs file path
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            bugs_path = os.path.join(script_dir, "bugs-to-fix.txt")
+            
+            # Always try to fetch the latest version from GitHub first
+            import urllib.request
+            import urllib.error
+            
+            bugs_url = "https://raw.githubusercontent.com/felixb/sldl-gui-macos/main/bugs-to-fix.txt"
+            
+            try:
+                # Fetch bugs from GitHub
+                with urllib.request.urlopen(bugs_url) as response:
+                    bugs_text = response.read().decode('utf-8')
+                
+                # Save to local file (overwrite if exists)
+                with open(bugs_path, 'w', encoding='utf-8') as f:
+                    f.write(bugs_text)
+                
+                # Open the downloaded file
+                subprocess.run(["open", bugs_path], check=True)
+                
+            except (urllib.error.URLError, Exception) as e:
+                # If GitHub fails, try to use local file if it exists
+                if os.path.exists(bugs_path):
+                    subprocess.run(["open", bugs_path], check=True)
+                else:
+                    # Show error if both GitHub and local file fail
+                    self.showAlert_message_("Error", f"Unable to load bugs file: {str(e)}\n\nPlease check your internet connection or visit the GitHub repository.")
+                    
+        except subprocess.CalledProcessError as e:
+            self.showAlert_message_("Error", f"Failed to open bugs file: {str(e)}")
+        except Exception as e:
+            self.showAlert_message_("Error", f"Unexpected error: {str(e)}")
+
+    def reportBug_(self, sender):
+        """Open user's email client with pre-populated bug report fields."""
+        import subprocess
+        import platform
+        import datetime
         
-        # Create scroll view for the guides text
-        scroll_view = NSScrollView.alloc().initWithFrame_(guides_window.contentView().bounds())
-        scroll_view.setHasVerticalScroller_(True)
-        scroll_view.setHasHorizontalScroller_(False)
-        scroll_view.setAutohidesScrollers_(True)
-        scroll_view.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
-        
-        # Create text view for the guides content
-        text_view = NSTextView.alloc().initWithFrame_(scroll_view.bounds())
-        text_view.setEditable_(False)
-        text_view.setSelectable_(True)
-        text_view.setRichText_(False)
-        
-        # Set font
-        font = objc.lookUpClass("NSFont").fontWithName_size_("Monaco", 11.0)
-        if font is None:
-            font = objc.lookUpClass("NSFont").systemFontOfSize_(11.0)
-        
-        text_view.setFont_(font)
-        text_view.setBackgroundColor_(NSColor.textBackgroundColor())
-        
-        # Set the guides text
-        text_view.setString_(guides_text)
-        
-        scroll_view.setDocumentView_(text_view)
-        guides_window.contentView().addSubview_(scroll_view)
-        
-        guides_window.makeKeyAndOrderFront_(None)
+        try:
+            # Get current date/time
+            now = datetime.datetime.now()
+            date_time_str = now.strftime("%Y-%m-%d %H:%M:%S")
+            
+            # Get system information
+            system_info = platform.system()
+            system_version = platform.mac_ver()[0] if system_info == "Darwin" else platform.platform()
+            
+            # Create email content
+            subject = f"Bug report {date_time_str}"
+            body = f"""[Your system]
+{system_info} {system_version}
+
+[Your version]
+{APP_VERSION}
+
+Please write your description here and add screenshots
+
+"""
+            
+            # Create mailto URL
+            mailto_url = f"mailto:a@whorl.cc?subject={urllib.parse.quote(subject)}&body={urllib.parse.quote(body)}"
+            
+            # Open default email client
+            subprocess.run(["open", mailto_url], check=True)
+            
+        except subprocess.CalledProcessError as e:
+            self.showAlert_message_("Error", f"Failed to open email client: {str(e)}")
+        except Exception as e:
+            self.showAlert_message_("Error", f"Unexpected error: {str(e)}")
 
     def sourceChanged_(self, sender):
         """Handle source selection change between YouTube, Spotify, Wishlist, and CSV File."""
@@ -1977,141 +2040,11 @@ class AppDelegate(NSObject):
         # Start update check in background thread
         threading.Thread(target=update_check_thread, daemon=True).start()
 
-    def exportFailedToWishlist_(self, sender):
-        """Export failed downloads to wishlist file."""
-        try:
-            # Get the download path to look for index files
-            download_path = self.path_field.stringValue().strip()
-            if not download_path:
-                self.showAlert_message_("Error", "Please set a download path first.")
-                return
-            
-            download_path = Path(download_path).expanduser()
-            if not download_path.exists():
-                self.showAlert_message_("Error", f"Download path does not exist: {download_path}")
-                return
-            
-            # Look for sldl index files
-            index_files = list(download_path.glob("*.sldl"))
-            if not index_files:
-                self.showAlert_message_("Error", "No sldl index files found in download directory.")
-                return
-            
-            # Use the most recent index file
-            latest_index = max(index_files, key=lambda f: f.stat().st_mtime)
-            
-            # Parse the index file to find failed downloads
-            failed_items = self.__parseFailedDownloadsFromIndex(latest_index)
-            if not failed_items:
-                self.showAlert_message_("Info", "No failed downloads found in the index file.")
-                return
-            
-            # Ask user for wishlist file location
-            panel = NSOpenPanel.openPanel()
-            panel.setCanChooseFiles_(True)
-            panel.setCanChooseDirectories_(False)
-            panel.setAllowsMultipleSelection_(False)
-            panel.setTitle_("Save Wishlist File")
-            panel.setAllowedFileTypes_(["txt"])
-            panel.setNameFieldStringValue_("wishlist.txt")
-            
-            if panel.runModal() == NSAlertFirstButtonReturn:
-                wishlist_path = panel.URL().path()
-                self.__writeWishlistFile(wishlist_path, failed_items)
-                self.showAlert_message_("Success", f"Exported {len(failed_items)} failed items to wishlist file.")
-                
-        except Exception as e:
-            self.showAlert_message_("Error", f"Failed to export wishlist: {str(e)}")
 
-    def openWishlist_(self, sender):
-        """Open wishlist file in default text editor."""
-        try:
-            # Ask user to select wishlist file
-            panel = NSOpenPanel.openPanel()
-            panel.setCanChooseFiles_(True)
-            panel.setCanChooseDirectories_(False)
-            panel.setAllowsMultipleSelection_(False)
-            panel.setTitle_("Open Wishlist File")
-            panel.setAllowedFileTypes_(["txt"])
-            
-            if panel.runModal() == NSAlertFirstButtonReturn:
-                wishlist_path = panel.URL().path()
-                # Open file with default text editor
-                subprocess.run(["open", wishlist_path])
-                
-        except Exception as e:
-            self.showAlert_message_("Error", f"Failed to open wishlist file: {str(e)}")
 
-    def __parseFailedDownloadsFromIndex(self, index_path):
-        """Parse failed downloads from sldl index file."""
-        failed_items = []
-        try:
-            with open(index_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith('#'):
-                        continue
-                    
-                    # Parse the index line format
-                    # Format: input,conditions,pref_conditions,state,path,failure_reason
-                    # Parse the CSV-like format properly
-                    parts = []
-                    current_part = ""
-                    in_quotes = False
-                    for char in line:
-                        if char == '"':
-                            in_quotes = not in_quotes
-                        elif char == ',' and not in_quotes:
-                            parts.append(current_part.strip())
-                            current_part = ""
-                        else:
-                            current_part += char
-                    parts.append(current_part.strip())
-                    
-                    if len(parts) >= 4:
-                        input_part = parts[0].strip('"')
-                        state = parts[3].strip('"')
-                        failure_reason = parts[5].strip('"') if len(parts) > 5 else ""
-                        
-                        # Check if this is a failed download
-                        if state == "failed" and failure_reason:
-                            # Extract the search query from the input
-                            # Input format: "artist=Artist,title=Title" or "Artist - Title"
-                            if 'artist=' in input_part and 'title=' in input_part:
-                                # Parse structured input
-                                artist = ""
-                                title = ""
-                                for param in input_part.split(','):
-                                    if param.startswith('artist='):
-                                        artist = param.split('=', 1)[1].strip()
-                                    elif param.startswith('title='):
-                                        title = param.split('=', 1)[1].strip()
-                                
-                                if artist and title:
-                                    failed_items.append(f'"{artist} - {title}"')
-                            else:
-                                # Use the input as-is
-                                failed_items.append(f'"{input_part}"')
-                                
-        except Exception as e:
-            print(f"Error parsing index file: {e}")
-        
-        return failed_items
 
-    def __writeWishlistFile(self, wishlist_path, items):
-        """Write items to wishlist file in sldl format."""
-        try:
-            with open(wishlist_path, 'w', encoding='utf-8') as f:
-                f.write("# sldl wishlist file\n")
-                f.write("# Format: \"input\" \"conditions\" \"pref_conditions\"\n")
-                f.write("# Example: \"Artist - Title\" \"format=mp3; br>128\" \"br >= 320\"\n\n")
-                
-                for item in items:
-                    # Write each failed item with default conditions
-                    f.write(f'{item} "" ""\n')
-                    
-        except Exception as e:
-            raise Exception(f"Failed to write wishlist file: {e}")
+
+
 
     def viewWishlist_(self, sender):
         """Show wishlist contents in a popup dialog."""

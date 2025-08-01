@@ -43,7 +43,7 @@ You can manually edit your wishlist if you wish(list):
 - Mandatory: Only accepts a certain format/bitrate
 
 ## Extra tools
-- 'output to .csv takes the currently selected spotify or youtube playlist and outputs this to a .csv file in the target directory
+- 'Output to .csv' takes the currently selected spotify or youtube playlist and outputs this to a .csv file in the target directory
 
 ---
 
