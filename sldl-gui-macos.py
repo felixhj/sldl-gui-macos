@@ -182,6 +182,43 @@ class AppDelegate(NSObject):
         )
         bugs_menu.addItem_(report_bug_item)
         
+        # Create Acknowledgements menu
+        acknowledgements_menu_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Acknowledgements", None, ""
+        )
+        main_menu.addItem_(acknowledgements_menu_item)
+        acknowledgements_menu = NSMenu.alloc().initWithTitle_("Acknowledgements")
+        acknowledgements_menu_item.setSubmenu_(acknowledgements_menu)
+        
+        # Add Acknowledgements item
+        acknowledgements_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Show Acknowledgements", "showAcknowledgements:", ""
+        )
+        acknowledgements_menu.addItem_(acknowledgements_item)
+        
+        # Add separator
+        acknowledgements_menu.addItem_(NSMenuItem.separatorItem())
+        
+        # Add clickable URL items
+        sldl_url_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Visit sldl (slsk-batchdl) Repository", "openSldlUrl:", ""
+        )
+        acknowledgements_menu.addItem_(sldl_url_item)
+        
+        fiso64_url_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Visit fiso64's GitHub Profile", "openFiso64Url:", ""
+        )
+        acknowledgements_menu.addItem_(fiso64_url_item)
+        
+        # Add separator
+        acknowledgements_menu.addItem_(NSMenuItem.separatorItem())
+        
+        # Add this project's repository link
+        project_url_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Visit this project's repository", "openProjectUrl:", ""
+        )
+        acknowledgements_menu.addItem_(project_url_item)
+        
         # Set the main menu
         NSApp.setMainMenu_(main_menu)
 
@@ -695,12 +732,8 @@ class AppDelegate(NSObject):
                 subprocess.run(["open", guides_path], check=True)
                 
             except (urllib.error.URLError, Exception) as e:
-                # If GitHub fails, try to use local file if it exists
-                if os.path.exists(guides_path):
-                    subprocess.run(["open", guides_path], check=True)
-                else:
-                    # Show error if both GitHub and local file fail
-                    self.showAlert_message_("Error", f"Unable to load guides: {str(e)}\n\nPlease check your internet connection or visit the GitHub repository.")
+                # Show error if GitHub source fails
+                self.showAlert_message_("Error", f"Unable to load guides: {str(e)}\n\nPlease check your internet connection or visit the GitHub repository.")
                     
         except subprocess.CalledProcessError as e:
             self.showAlert_message_("Error", f"Failed to open guides file: {str(e)}")
@@ -736,12 +769,8 @@ class AppDelegate(NSObject):
                 subprocess.run(["open", bugs_path], check=True)
                 
             except (urllib.error.URLError, Exception) as e:
-                # If GitHub fails, try to use local file if it exists
-                if os.path.exists(bugs_path):
-                    subprocess.run(["open", bugs_path], check=True)
-                else:
-                    # Show error if both GitHub and local file fail
-                    self.showAlert_message_("Error", f"Unable to load bugs file: {str(e)}\n\nPlease check your internet connection or visit the GitHub repository.")
+                # Show error if GitHub source fails
+                self.showAlert_message_("Error", f"Unable to load bugs file: {str(e)}\n\nPlease check your internet connection or visit the GitHub repository.")
                     
         except subprocess.CalledProcessError as e:
             self.showAlert_message_("Error", f"Failed to open bugs file: {str(e)}")
@@ -785,6 +814,38 @@ Please write your description here and add screenshots
             self.showAlert_message_("Error", f"Failed to open email client: {str(e)}")
         except Exception as e:
             self.showAlert_message_("Error", f"Unexpected error: {str(e)}")
+
+    def showAcknowledgements_(self, sender):
+        """Show acknowledgements popup with credits to sldl and Cursor."""
+        acknowledgements_text = """This is all built on top of sldl (slsk-batchdl) - a command line interface built by fiso64. This does all the heavy lifting here, so a huge thank you to them for the work, and for open sourcing.
+
+Cursor did all the rest, so a thank you to big ai, I guess?"""
+        
+        self.showAlert_message_("Acknowledgements", acknowledgements_text)
+
+    def openSldlUrl_(self, sender):
+        """Open sldl (slsk-batchdl) repository in default browser."""
+        import subprocess
+        try:
+            subprocess.run(["open", "https://github.com/fiso64/slsk-batchdl"], check=True)
+        except subprocess.CalledProcessError as e:
+            self.showAlert_message_("Error", f"Failed to open URL: {str(e)}")
+
+    def openFiso64Url_(self, sender):
+        """Open fiso64's GitHub profile in default browser."""
+        import subprocess
+        try:
+            subprocess.run(["open", "https://github.com/fiso64"], check=True)
+        except subprocess.CalledProcessError as e:
+            self.showAlert_message_("Error", f"Failed to open URL: {str(e)}")
+
+    def openProjectUrl_(self, sender):
+        """Open this project's repository in default browser."""
+        import subprocess
+        try:
+            subprocess.run(["open", "https://github.com/felixhj/sldl-gui-macos"], check=True)
+        except subprocess.CalledProcessError as e:
+            self.showAlert_message_("Error", f"Failed to open URL: {str(e)}")
 
     def sourceChanged_(self, sender):
         """Handle source selection change between YouTube, Spotify, Wishlist, and CSV File."""
