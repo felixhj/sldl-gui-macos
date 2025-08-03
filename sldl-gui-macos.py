@@ -16,7 +16,7 @@ from pathlib import Path
 # Application version
 APP_VERSION = "0.3.6"
 
-from csv_processor import SLDLCSVProcessor
+from csv_processor import SLDLCSVProcessor, SessionLogger
 
 try:
     import objc
@@ -79,6 +79,7 @@ class AppDelegate(NSObject):
         self.download_running = False
         self.user_stopped = False
         self.download_target_dir = None
+        self.session_logger = None  # Will be initialized when download starts
 
         
         if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
@@ -1127,6 +1128,14 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
         """Handle stop download button click."""
         if self.current_process and self.download_running:
             self.user_stopped = True  # Mark that the user initiated the stop
+            
+            # Mark remaining tracks as failed in session logger
+            if self.session_logger and self.session_logger.session_started:
+                self.session_logger.mark_remaining_tracks_failed(7)  # Session stopped by user
+                self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "appendOutput:", "📝 Marked remaining tracks as failed (session stopped)\n", False
+                )
+            
             try:
                 # Terminate the process
                 self.current_process.terminate()
@@ -1172,17 +1181,18 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                 if path:
                     cmd.extend(['--path', path])
             elif selected_source == "CSV File":
-                # Create temporary wishlist file from CSV in sldl format
-                temp_wishlist_file = self.__createSldlWishlistFileFromCSV()
-                if not temp_wishlist_file:
+                # Use CSV file directly with csv input type
+                csv_path = self.csv_field.stringValue().strip()
+                if not csv_path:
                     self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                        "appendOutput:", "❌ Failed to create wishlist file from CSV for sldl.\n", False
+                        "appendOutput:", "❌ No CSV file specified.\n", False
                     )
                     return
                 
-                input_source = temp_wishlist_file
-                # Build base command for CSV with input-type parameter (same as wishlist)
-                cmd = [str(self.sldl_path), input_source, '--input-type', 'list', '--user', username, '--pass', password]
+                # Pass CSV file directly to sldl
+                input_source = csv_path
+                # Build base command for CSV with csv input-type parameter
+                cmd = [str(self.sldl_path), input_source, '--input-type', 'csv', '--user', username, '--pass', password]
                 if path:
                     # Create custom folder name for CSV: csv_YYYYMMDD_HHMMSS
                     csv_folder = Path(path) / f"csv_{timestamp}"
@@ -1192,17 +1202,18 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                     csv_folder = Path.cwd() / f"csv_{timestamp}"
                     cmd.extend(['--path', str(csv_folder)])
             else:  # Wishlist
-                # Create temporary wishlist file in sldl format
-                temp_wishlist_file = self.__createSldlWishlistFile()
-                if not temp_wishlist_file:
+                # Create temporary CSV file from wishlist
+                temp_csv_file = self.__createCSVFileFromWishlist()
+                if not temp_csv_file:
                     self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                        "appendOutput:", "❌ Failed to create wishlist file for sldl.\n", False
+                        "appendOutput:", "❌ Failed to create CSV file from wishlist.\n", False
                     )
                     return
                 
-                input_source = temp_wishlist_file
-                # Build base command for wishlist with input-type parameter
-                cmd = [str(self.sldl_path), input_source, '--input-type', 'list', '--user', username, '--pass', password]
+                # Pass CSV file to sldl
+                input_source = temp_csv_file
+                # Build base command for wishlist with csv input-type parameter
+                cmd = [str(self.sldl_path), input_source, '--input-type', 'csv', '--user', username, '--pass', password]
                 if path:
                     # Create custom folder name for wishlist: wishlist_YYYYMMDD_HHMMSS
                     wishlist_folder = Path(path) / f"wishlist_{timestamp}"
@@ -1248,6 +1259,73 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
             if strict_max_bitrate and strict_max_bitrate.isdigit():
                 cmd.extend(['--max-bitrate', strict_max_bitrate])
 
+            # Initialize session logger based on source type
+            tracks_to_download = []
+            if selected_source == "YouTube Playlist":
+                # For YouTube, we'll get tracks after the command is built
+                pass
+            elif selected_source == "Spotify Playlist":
+                # For Spotify, we'll get tracks after the command is built
+                pass
+            elif selected_source == "CSV File":
+                # For CSV, get tracks from the CSV file
+                csv_path = self.csv_field.stringValue().strip()
+                if csv_path:
+                    import csv
+                    with open(csv_path, 'r', newline='', encoding='utf-8') as csvfile:
+                        reader = csv.DictReader(csvfile)
+                        for row in reader:
+                            if 'title' in row and 'artist' in row and row['artist'] and row['title']:
+                                tracks_to_download.append(f"{row['artist']} - {row['title']}")
+                            elif 'title' in row and row['title']:
+                                # For CSV with only title column, use title as search string
+                                tracks_to_download.append(row['title'])
+            else:  # Wishlist
+                # For wishlist, get tracks from wishlist file
+                tracks_to_download = self.__loadWishlistItems()
+            
+            # Initialize session logger if we have tracks
+            if tracks_to_download:
+                # Determine download directory for session logger
+                if path:
+                    download_dir = Path(path)
+                else:
+                    download_dir = Path.cwd()
+                
+                # Initialize session logger
+                self.session_logger = SessionLogger(str(download_dir))
+                source_type = selected_source.lower().replace(' ', '_')
+                if self.session_logger.start_session(tracks_to_download, source_type):
+                    self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                        "appendOutput:", f"📝 Session logging initialized with {len(tracks_to_download)} tracks\n", False
+                    )
+                else:
+                    self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                        "appendOutput:", "⚠️ Failed to initialize session logging\n", False
+                    )
+            
+            # For YouTube and Spotify playlists, get tracks and initialize session logger
+            if selected_source in ["YouTube Playlist", "Spotify Playlist"]:
+                tracks_to_download = self.__get_playlist_tracks()
+                if tracks_to_download:
+                    # Determine download directory for session logger
+                    if path:
+                        download_dir = Path(path)
+                    else:
+                        download_dir = Path.cwd()
+                    
+                    # Initialize session logger
+                    self.session_logger = SessionLogger(str(download_dir))
+                    source_type = selected_source.lower().replace(' ', '_')
+                    if self.session_logger.start_session(tracks_to_download, source_type):
+                        self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                            "appendOutput:", f"📝 Session logging initialized with {len(tracks_to_download)} tracks\n", False
+                        )
+                    else:
+                        self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                            "appendOutput:", "⚠️ Failed to initialize session logging\n", False
+                        )
+            
             # Show the command being executed
             cmd_str = " ".join(cmd).replace(password, "***")  # Hide password
             self.performSelectorOnMainThread_withObject_waitUntilDone_(
@@ -1283,7 +1361,6 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                 except:
                     pass  # Fall back to dynamic detection
             elif selected_source == "CSV File":
-                temp_file_to_cleanup = input_source
                 # For CSV file, we can estimate total tracks from CSV items
                 try:
                     csv_path = self.csv_field.stringValue().strip()
@@ -1294,8 +1371,8 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                         for row in reader:
                             if 'title' in row and 'artist' in row and row['artist'] and row['title']:
                                 csv_items.append(f"{row['artist']} - {row['title']}")
-                            elif 'track' in row and row['track']:
-                                csv_items.append(row['track'])
+                            elif 'title' in row and row['title']:
+                                csv_items.append(row['title'])
                     initial_total_tracks = len(csv_items)
                     if initial_total_tracks > 0:
                         # Set initial progress for CSV file
@@ -1440,6 +1517,40 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                     os.unlink(temp_file_to_cleanup)
                 except Exception as e:
                     print(f"Error cleaning up temp file: {e}")
+            
+            # Process session logger if it exists
+            if hasattr(self, 'session_logger') and self.session_logger:
+                try:
+                    # If sldl produced an index file, process it
+                    if path:
+                        download_dir = Path(path)
+                    else:
+                        download_dir = Path.cwd()
+                    
+                    # Look for sldl index files
+                    index_files = list(download_dir.rglob("_index.csv"))
+                    if index_files:
+                        # Use the most recent one
+                        index_file = max(index_files, key=lambda f: f.stat().st_mtime)
+                        self.session_logger.process_sldl_index_file(str(index_file))
+                        self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                            "appendOutput:", "📝 Processed sldl index file and updated session log\n", False
+                        )
+                    
+                    # Process wishlist updates if enabled
+                    if self.wishlist_mode_checkbox.state():
+                        log_path = self.session_logger.get_log_path()
+                        if self.session_logger.log_exists():
+                            # Add failed downloads to wishlist
+                            self.__processFailedDownloadsToWishlist(log_path)
+                            # Remove successful downloads from wishlist
+                            self.__removeSuccessfulDownloadsFromWishlist(log_path)
+                    
+                except Exception as e:
+                    print(f"Error processing session logger: {e}")
+                
+                # Clear session logger reference
+                self.session_logger = None
             
             # Re-enable the start button and disable stop button
             self.performSelectorOnMainThread_withObject_waitUntilDone_(
@@ -1700,6 +1811,14 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
             elif selected_source == "Spotify Playlist":
                 playlist_url = self.spotify_field.stringValue().strip()
                 cmd = [str(self.sldl_path), playlist_url, '--print', 'tracks']
+            elif selected_source == "CSV File":
+                # Create temporary wishlist file from CSV in sldl format
+                temp_wishlist_file = self.__createSldlWishlistFileFromCSV()
+                if not temp_wishlist_file:
+                    return []
+                
+                wishlist_file = temp_wishlist_file
+                cmd = [str(self.sldl_path), wishlist_file, '--input-type', 'string', '--print', 'tracks']
             else:  # Wishlist
                 # Create temporary wishlist file in sldl format
                 temp_wishlist_file = self.__createSldlWishlistFile()
@@ -1707,7 +1826,7 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                     return []
                 
                 wishlist_file = temp_wishlist_file
-                cmd = [str(self.sldl_path), wishlist_file, '--input-type', 'list', '--print', 'tracks']
+                cmd = [str(self.sldl_path), wishlist_file, '--input-type', 'string', '--print', 'tracks']
             
             result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
             
@@ -2205,86 +2324,69 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                 with open(WISHLIST_FILE, 'r', newline='', encoding='utf-8') as csvfile:
                     reader = csv.DictReader(csvfile)
                     for row in reader:
-                        if 'title' in row and 'artist' in row:
-                            items.append(f"{row['artist']} - {row['title']}")
-                        elif 'track' in row:
+                        # Handle different formats: artist-title, title-only, or combined-string
+                        if 'combined-string' in row and row['combined-string']:
+                            items.append(row['combined-string'])
+                        elif 'title' in row and 'artist' in row:
+                            if row['artist'] and row['title']:
+                                # Both artist and title present
+                                items.append(f"{row['artist']} - {row['title']}")
+                            elif row['title'] and not row['artist']:
+                                # Title-only (from CSV with only title column)
+                                items.append(row['title'])
+                        elif 'track' in row and row['track']:
                             items.append(row['track'])
             except Exception as e:
                 print(f"Error loading wishlist: {e}")
         return items
 
-    def __createSldlWishlistFile(self):
-        """Create a temporary wishlist file in the format sldl expects."""
+    def __createCSVFileFromWishlist(self):
+        """Create a temporary CSV file from wishlist for sldl csv input type."""
         try:
             wishlist_items = self.__loadWishlistItems()
+            print(f"Loaded {len(wishlist_items)} wishlist items")
             if not wishlist_items:
+                print("No wishlist items found")
                 return None
             
-            # Create a temporary file with proper sldl list format
+            # Create a temporary CSV file with artist and title columns
             import tempfile
-            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
+            import csv
+            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8', newline='')
+            
+            writer = csv.writer(temp_file)
+            writer.writerow(['artist', 'title'])  # CSV header
             
             for item in wishlist_items:
                 if ' - ' in item:
                     artist, title = item.split(' - ', 1)
-                    # Format: "artist=Artist,title=Title"     ""     ""
-                    formatted_line = f'"artist={artist},title={title}"\t""\t""\n'
+                    writer.writerow([artist, title])
+                    print(f"Wrote CSV row: {artist}, {title}")
                 else:
-                    # For items without artist-title format, use as search string
-                    formatted_line = f'"{item}"\t""\t""\n'
-                
-                temp_file.write(formatted_line)
+                    # For items without artist-title format, put in title column
+                    writer.writerow(['', item])
+                    print(f"Wrote CSV row: , {item}")
             
             temp_file.close()
+            print(f"Created CSV file: {temp_file.name}")
+            
+            # Verify the file was created and has content
+            import os
+            if os.path.exists(temp_file.name):
+                with open(temp_file.name, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    print(f"CSV file content: {repr(content)}")
+                    print(f"CSV file size: {len(content)} bytes")
+            else:
+                print(f"ERROR: CSV file was not created: {temp_file.name}")
+            
             return temp_file.name
             
         except Exception as e:
-            print(f"Error creating sldl wishlist file: {e}")
+            print(f"Error creating CSV file from wishlist: {e}")
             return None
 
-    def __createSldlWishlistFileFromCSV(self):
-        """Create a temporary wishlist file from CSV in the format sldl expects."""
-        try:
-            csv_path = self.csv_field.stringValue().strip()
-            if not csv_path:
-                return None
-            
-            # Read CSV file and extract items
-            import csv
-            items = []
-            
-            with open(csv_path, 'r', newline='', encoding='utf-8') as csvfile:
-                reader = csv.DictReader(csvfile)
-                for row in reader:
-                    if 'title' in row and 'artist' in row and row['artist'] and row['title']:
-                        items.append(f"{row['artist']} - {row['title']}")
-                    elif 'track' in row and row['track']:
-                        items.append(row['track'])
-            
-            if not items:
-                return None
-            
-            # Create a temporary file with proper sldl list format
-            import tempfile
-            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
-            
-            for item in items:
-                if ' - ' in item:
-                    artist, title = item.split(' - ', 1)
-                    # Format: "artist=Artist,title=Title"     ""     ""
-                    formatted_line = f'"artist={artist},title={title}"\t""\t""\n'
-                else:
-                    # For items without artist-title format, use as search string
-                    formatted_line = f'"{item}"\t""\t""\n'
-                
-                temp_file.write(formatted_line)
-            
-            temp_file.close()
-            return temp_file.name
-            
-        except Exception as e:
-            print(f"Error creating sldl wishlist file from CSV: {e}")
-            return None
+
 
     def __saveWishlistItems(self, items):
         """Save wishlist items to CSV file."""
@@ -2298,9 +2400,15 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                 for item in items:
                     if ' - ' in item:
                         artist, title = item.split(' - ', 1)
-                        writer.writerow({'artist': artist, 'title': title})
+                        writer.writerow({
+                            'artist': artist, 
+                            'title': title
+                        })
                     else:
-                        writer.writerow({'artist': '', 'title': item})
+                        writer.writerow({
+                            'artist': '', 
+                            'title': item
+                        })
         except Exception as e:
             raise Exception(f"Failed to save wishlist: {e}")
 
@@ -2366,9 +2474,15 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                         for item in wishlist_items:
                             if ' - ' in item:
                                 artist, title = item.split(' - ', 1)
-                                writer.writerow({'artist': artist, 'title': title})
+                                writer.writerow({
+                                    'artist': artist, 
+                                    'title': title
+                                })
                             else:
-                                writer.writerow({'artist': '', 'title': item})
+                                writer.writerow({
+                                    'artist': '', 
+                                    'title': item
+                                })
                     
                     self.showAlert_message_("Success", f"Exported {len(wishlist_items)} items to wishlist file.")
                 except Exception as e:
@@ -2388,8 +2502,8 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                 for row in reader:
                     if 'title' in row and 'artist' in row and row['artist'] and row['title']:
                         items_to_import.append(f"{row['artist']} - {row['title']}")
-                    elif 'track' in row and row['track']:
-                        items_to_import.append(row['track'])
+                    elif 'title' in row and row['title']:
+                        items_to_import.append(row['title'])
             
             if items_to_import:
                 return self.__addToWishlist(items_to_import)
@@ -2403,6 +2517,7 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
         try:
             import csv
             failed_items = []
+            wishlist_items = set(self.__loadWishlistItems())
             
             with open(log_path, 'r', newline='', encoding='utf-8') as csvfile:
                 reader = csv.DictReader(csvfile)
@@ -2415,12 +2530,25 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                     if (state == '2' or state_desc == 'Failed' or 
                         'Failed' in failure_desc or 'cancelled' in failure_desc.lower()):
                         
-                        # Extract artist and title
-                        artist = row.get('artist', '')
-                        title = row.get('title', '')
+                        # Use smart cross-referencing to check if already in wishlist
+                        matched_item = self.__smartCrossReference(row, wishlist_items)
                         
-                        if artist and title:
-                            failed_items.append(f"{artist} - {title}")
+                        # If not already in wishlist, add it
+                        if not matched_item:
+                            artist = row.get('artist', '')
+                            title = row.get('title', '')
+                            combined_string = row.get('combined_string', '')
+                            
+                            # Handle different formats: artist-title, title-only, or combined_string
+                            if artist and title:
+                                # Both artist and title present
+                                failed_items.append(f"{artist} - {title}")
+                            elif title and not artist:
+                                # Title-only (from CSV with only title column)
+                                failed_items.append(title)
+                            elif combined_string and not artist and not title:
+                                # Combined string only (fallback)
+                                failed_items.append(combined_string)
             
             if failed_items:
                 added_count = self.__addToWishlist(failed_items)
@@ -2432,11 +2560,62 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
         except Exception as e:
             print(f"Error processing failed downloads to wishlist: {e}")
 
+    def __smartCrossReference(self, log_item, wishlist_items):
+        """
+        Smart cross-referencing that can match between different formats:
+        - artist-title format vs title-only format
+        - Handles both possible orderings when one side has only title
+        """
+        artist = log_item.get('artist', '')
+        title = log_item.get('title', '')
+        combined_string = log_item.get('combined_string', '')
+        
+        # Generate possible matches for this log item
+        possible_matches = []
+        
+        if artist and title:
+            # Log item has both artist and title
+            possible_matches.append(f"{artist} - {title}")
+            # Also try title-only format for cross-referencing
+            possible_matches.append(f"{artist} {title}")
+            possible_matches.append(f"{title} {artist}")
+        elif title and not artist:
+            # Log item has only title (from CSV with only title column)
+            possible_matches.append(title)
+            # Try to split title into artist and title if it contains spaces
+            title_parts = title.split()
+            if len(title_parts) >= 2:
+                # Try different combinations of the parts
+                for i in range(1, len(title_parts)):
+                    artist_part = ' '.join(title_parts[:i])
+                    title_part = ' '.join(title_parts[i:])
+                    possible_matches.append(f"{artist_part} - {title_part}")
+                    possible_matches.append(f"{title_part} - {artist_part}")
+        elif combined_string and not artist and not title:
+            # Log item has only combined_string
+            possible_matches.append(combined_string)
+            # Try to split combined_string into artist and title if it contains spaces
+            combined_parts = combined_string.split()
+            if len(combined_parts) >= 2:
+                # Try different combinations of the parts
+                for i in range(1, len(combined_parts)):
+                    artist_part = ' '.join(combined_parts[:i])
+                    title_part = ' '.join(combined_parts[i:])
+                    possible_matches.append(f"{artist_part} - {title_part}")
+                    possible_matches.append(f"{title_part} - {artist_part}")
+        
+        # Check if any of the possible matches exist in wishlist
+        for match in possible_matches:
+            if match in wishlist_items:
+                return match
+        return None
+
     def __removeSuccessfulDownloadsFromWishlist(self, log_path):
         """Remove successfully downloaded tracks from wishlist."""
         try:
             import csv
             successful_items = []
+            wishlist_items = set(self.__loadWishlistItems())
             
             with open(log_path, 'r', newline='', encoding='utf-8') as csvfile:
                 reader = csv.DictReader(csvfile)
@@ -2446,11 +2625,10 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                     state_desc = row.get('state_description', '')
                     
                     if (state == '1' or state_desc == 'Downloaded'):
-                        artist = row.get('artist', '')
-                        title = row.get('title', '')
-                        
-                        if artist and title:
-                            successful_items.append(f"{artist} - {title}")
+                        # Use smart cross-referencing to find matches
+                        matched_item = self.__smartCrossReference(row, wishlist_items)
+                        if matched_item:
+                            successful_items.append(matched_item)
             
             if successful_items:
                 removed_count = self.__removeFromWishlist(successful_items)

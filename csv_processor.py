@@ -9,6 +9,244 @@ import os
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
+from datetime import datetime
+
+
+class SessionLogger:
+    """Handles comprehensive session logging with real-time updates and state tracking."""
+    
+    # State codes mapping (from slsk-batchdl source code Enums.cs)
+    STATE_CODES = {
+        0: "Initial",
+        1: "Downloaded", 
+        2: "Failed",
+        3: "AlreadyExists",
+        4: "NotFoundLastTime"
+    }
+    
+    # Failure reason codes mapping (from slsk-batchdl source code Enums.cs)
+    FAILURE_CODES = {
+        0: "None",
+        1: "InvalidSearchString",
+        2: "OutOfDownloadRetries", 
+        3: "NoSuitableFileFound",
+        4: "AllDownloadsFailed",
+        5: "Other",
+        6: "Download cancelled by user",
+        7: "Session stopped by user",
+        8: "Not attempted"
+    }
+    
+    def __init__(self, log_directory: str):
+        self.log_directory = Path(log_directory)
+        self.log_file = self.log_directory / 'log.csv'
+        self.session_started = False
+        self.tracks_to_download = []
+        
+    def start_session(self, tracks: List[str], source_type: str):
+        """Initialize a new download session and create log.csv."""
+        try:
+            self.log_directory.mkdir(parents=True, exist_ok=True)
+            self.tracks_to_download = tracks
+            self.session_started = True
+            
+            # Create initial log.csv with all tracks in "Initial" state
+            with open(self.log_file, 'w', newline='', encoding='utf-8') as csvfile:
+                fieldnames = ['artist', 'title', 'combined_string', 'state', 'state_description', 'failure_reason', 'failure_description', 'source_type']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                
+                for track in tracks:
+                    # Parse track into artist and title
+                    artist, title, combined_string = self._parse_track(track)
+                    
+                    writer.writerow({
+                        'artist': artist,
+                        'title': title, 
+                        'combined_string': combined_string,
+                        'state': 0,  # Initial
+                        'state_description': self.STATE_CODES[0],
+                        'failure_reason': 0,  # None
+                        'failure_description': self.FAILURE_CODES[0],
+                        'source_type': source_type
+                    })
+            
+            print(f"Session started with {len(tracks)} tracks. Log file created: {self.log_file}")
+            return True
+            
+        except Exception as e:
+            print(f"Error starting session: {e}")
+            return False
+    
+    def update_track_state(self, track: str, state: int, failure_reason: int = 0):
+        """Update the state of a specific track in the log."""
+        try:
+            if not self.session_started:
+                print("Session not started. Cannot update track state.")
+                return False
+            
+            # Read current log
+            rows = []
+            with open(self.log_file, 'r', newline='', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                for row in reader:
+                    # Check if this is the track to update
+                    artist, title, combined_string = self._parse_track(track)
+                    if (row['artist'] == artist and row['title'] == title) or row['combined_string'] == combined_string:
+                        row['state'] = str(state)
+                        row['state_description'] = self.STATE_CODES.get(state, f"Unknown State ({state})")
+                        row['failure_reason'] = str(failure_reason)
+                        row['failure_description'] = self.FAILURE_CODES.get(failure_reason, f"Unknown Failure ({failure_reason})")
+                    rows.append(row)
+            
+            # Write updated log
+            with open(self.log_file, 'w', newline='', encoding='utf-8') as csvfile:
+                fieldnames = ['artist', 'title', 'combined_string', 'state', 'state_description', 'failure_reason', 'failure_description', 'source_type']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(rows)
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error updating track state: {e}")
+            return False
+    
+    def mark_remaining_tracks_failed(self, failure_reason: int = 7):
+        """Mark all remaining tracks that haven't been processed as failed (session stopped)."""
+        try:
+            if not self.session_started:
+                return False
+            
+            rows = []
+            with open(self.log_file, 'r', newline='', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                for row in reader:
+                    # Mark tracks that are still in Initial state as failed
+                    if row['state'] == '0':  # Initial state
+                        row['state'] = '2'  # Failed
+                        row['state_description'] = self.STATE_CODES[2]
+                        row['failure_reason'] = str(failure_reason)
+                        row['failure_description'] = self.FAILURE_CODES.get(failure_reason, f"Unknown Failure ({failure_reason})")
+                    rows.append(row)
+            
+            # Write updated log
+            with open(self.log_file, 'w', newline='', encoding='utf-8') as csvfile:
+                fieldnames = ['artist', 'title', 'combined_string', 'state', 'state_description', 'failure_reason', 'failure_description', 'source_type']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(rows)
+            
+            print(f"Marked remaining tracks as failed (session stopped)")
+            return True
+            
+        except Exception as e:
+            print(f"Error marking remaining tracks failed: {e}")
+            return False
+    
+    def process_sldl_index_file(self, index_file_path: str):
+        """Process sldl's index file and update our log accordingly."""
+        try:
+            index_path = Path(index_file_path)
+            if not index_path.exists():
+                print(f"Index file not found: {index_file_path}")
+                return False
+            
+            # Read sldl's index file
+            sldl_results = {}
+            with open(index_path, 'r', newline='', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                for row in reader:
+                    # Extract key information from sldl's format
+                    artist = row.get('artist', '')
+                    title = row.get('title', '')
+                    state = row.get('state', '0')
+                    failure_reason = row.get('failurereason', '0')
+                    
+                    # Create a key for matching
+                    if artist and title:
+                        key = f"{artist} - {title}"
+                    else:
+                        # Fallback to combined string if available
+                        key = row.get('combined_string', '')
+                    
+                    sldl_results[key] = {
+                        'state': int(state) if state.isdigit() else 0,
+                        'failure_reason': int(failure_reason) if failure_reason.isdigit() else 0
+                    }
+            
+            # Update our log with sldl's results
+            rows = []
+            with open(self.log_file, 'r', newline='', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                for row in reader:
+                    # Try to match with sldl results
+                    artist = row.get('artist', '')
+                    title = row.get('title', '')
+                    combined_string = row.get('combined_string', '')
+                    
+                    # Create matching keys
+                    keys_to_try = []
+                    if artist and title:
+                        keys_to_try.append(f"{artist} - {title}")
+                    if combined_string:
+                        keys_to_try.append(combined_string)
+                    
+                    # Find matching sldl result
+                    matched = False
+                    for key in keys_to_try:
+                        if key in sldl_results:
+                            sldl_result = sldl_results[key]
+                            row['state'] = str(sldl_result['state'])
+                            row['state_description'] = self.STATE_CODES.get(sldl_result['state'], f"Unknown State ({sldl_result['state']})")
+                            row['failure_reason'] = str(sldl_result['failure_reason'])
+                            row['failure_description'] = self.FAILURE_CODES.get(sldl_result['failure_reason'], f"Unknown Failure ({sldl_result['failure_reason']})")
+                            matched = True
+                            break
+                    
+                    # If no match found and still in Initial state, mark as not attempted
+                    if not matched and row['state'] == '0':
+                        row['state'] = '2'  # Failed
+                        row['state_description'] = self.STATE_CODES[2]
+                        row['failure_reason'] = '8'  # Not attempted
+                        row['failure_description'] = self.FAILURE_CODES[8]
+                    
+                    rows.append(row)
+            
+            # Write updated log
+            with open(self.log_file, 'w', newline='', encoding='utf-8') as csvfile:
+                fieldnames = ['artist', 'title', 'combined_string', 'state', 'state_description', 'failure_reason', 'failure_description', 'source_type']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(rows)
+            
+            print(f"Processed sldl index file and updated log")
+            return True
+            
+        except Exception as e:
+            print(f"Error processing sldl index file: {e}")
+            return False
+    
+    def _parse_track(self, track: str) -> tuple:
+        """Parse a track string into artist, title, and combined_string."""
+        track = track.strip()
+        
+        # Only split by " - " (standard format) - no intelligent parsing
+        if ' - ' in track:
+            artist, title = track.split(' - ', 1)
+            return artist.strip(), title.strip(), track
+        else:
+            # For tracks without " - " separator, preserve as title-only
+            # Don't parse single strings - keep them as title
+            return '', track, track
+    
+    def get_log_path(self) -> str:
+        """Get the path to the current log file."""
+        return str(self.log_file)
+    
+    def log_exists(self) -> bool:
+        """Check if the log file exists."""
+        return self.log_file.exists()
 
 
 class SLDLCSVProcessor:
