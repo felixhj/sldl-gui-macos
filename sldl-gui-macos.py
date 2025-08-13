@@ -6,6 +6,7 @@ import threading
 import json
 import sys
 import re
+import unicodedata
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -33,6 +34,12 @@ try:
         NSViewWidthSizable, NSViewHeightSizable, NSViewMinXMargin,
         NSViewMaxXMargin, NSViewMinYMargin, NSViewMaxYMargin, NSThread
     )
+    # Import termination reply constants from AppKit for applicationShouldTerminate_
+    try:
+        from AppKit import NSApplicationTerminateCancel, NSApplicationTerminateNow
+    except Exception:
+        NSApplicationTerminateCancel = 0
+        NSApplicationTerminateNow = 1
 except ImportError as e:
     print(f"Error importing PyObjC: {e}")
     print("Please install PyObjC with: pip install pyobjc-framework-Cocoa")
@@ -101,6 +108,29 @@ class AppDelegate(NSObject):
         
         NSApp.activateIgnoringOtherApps_(True)
 
+    def applicationShouldTerminate_(self, sender):
+        # If a download/session is running, confirm before quitting
+        try:
+            if getattr(self, 'download_running', False):
+                if self.download_running:
+                    alert = NSAlert.alloc().init()
+                    alert.setMessageText_("Quit while session is in progress?")
+                    alert.setInformativeText_(
+                        "A download session is currently in progress. Are you sure you want to quit?"
+                    )
+                    alert.addButtonWithTitle_("Quit")
+                    alert.addButtonWithTitle_("Cancel")
+                    response = alert.runModal()
+                    if response == NSAlertFirstButtonReturn:
+                        return NSApplicationTerminateNow
+                    else:
+                        return NSApplicationTerminateCancel
+            # No session running; allow quit
+            return NSApplicationTerminateNow
+        except Exception:
+            # On any error, be safe and cancel termination
+            return NSApplicationTerminateCancel
+
     def setup_menu(self):
         """Setup application menu with Edit menu for copy/paste support and Extra Tools menu."""
         # Create main menu bar
@@ -162,6 +192,12 @@ class AppDelegate(NSObject):
             "Output to .csv", "outputToCSV:", ""
         )
         extra_tools_menu.addItem_(output_csv_item)
+        
+        # Add Import wishlist from SoulseekQT item
+        import_slsk_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Import wishlist from SoulseekQT", "importWishlistFromSoulseekQT:", ""
+        )
+        extra_tools_menu.addItem_(import_slsk_item)
         
         # Create Bugs menu
         bugs_menu_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
@@ -445,6 +481,15 @@ class AppDelegate(NSObject):
         self.browse_button.setAction_("browseDirectory:")
         self.browse_button.setAutoresizingMask_(NSViewMinXMargin | NSViewMinYMargin)
         view.addSubview_(self.browse_button)
+
+        # Search Cleaning option
+        y -= FIELD_Y_SPACING
+        self.clean_search_checkbox = NSButton.alloc().initWithFrame_(NSMakeRect(PADDING, y, 150, CONTROL_HEIGHT))
+        self.clean_search_checkbox.setButtonType_(NSButtonTypeSwitch)
+        self.clean_search_checkbox.setTitle_("Alphanumeric Only")
+        self.clean_search_checkbox.setState_(False)
+        self.clean_search_checkbox.setAutoresizingMask_(NSViewMinYMargin)
+        view.addSubview_(self.clean_search_checkbox)
 
         # --- Wishlist Management Section ---
         y -= SECTION_SPACING
@@ -1156,6 +1201,43 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                 # UI updates are now handled in the downloadThread's finally block
                 self.download_running = False
                 self.stop_button.setEnabled_(False)
+                # Kick off cleanup of any leftover .incomplete files in the download directory
+                try:
+                    self._cleanupIncompleteFilesAsync()
+                except Exception as e:
+                    # Best-effort cleanup; do not interrupt UI flow
+                    print(f"Error scheduling incomplete files cleanup: {e}")
+
+    def _cleanupIncompleteFilesAsync(self):
+        """Start a background thread to recursively delete '*.incomplete' files in the download directory."""
+        try:
+            base_dir = self.download_target_dir if getattr(self, 'download_target_dir', None) else Path.cwd()
+
+            def _worker():
+                try:
+                    removed_count = 0
+                    for file_path in Path(base_dir).rglob("*.incomplete"):
+                        try:
+                            file_path.unlink()
+                            removed_count += 1
+                        except Exception as inner_e:
+                            print(f"Error deleting incomplete file {file_path}: {inner_e}")
+
+                    if removed_count > 0:
+                        self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                            "appendOutput:", f"🧹 Removed {removed_count} incomplete files\n", False
+                        )
+                    else:
+                        self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                            "appendOutput:", "🧹 No incomplete files to remove\n", False
+                        )
+                except Exception as worker_e:
+                    print(f"Error during incomplete files cleanup: {worker_e}")
+
+            thread = threading.Thread(target=_worker, daemon=True)
+            thread.start()
+        except Exception as e:
+            print(f"Error launching cleanup thread: {e}")
 
     def downloadThread(self):
         """Run the download process in a background thread."""
@@ -1189,8 +1271,15 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                     )
                     return
                 
-                # Pass CSV file directly to sldl
+                # Pass CSV file to sldl, optionally via a sanitized temporary copy
                 input_source = csv_path
+                try:
+                    if self.clean_search_checkbox.state():
+                        sanitized_csv = self.__createSanitizedCopyOfCSV(csv_path)
+                        if sanitized_csv:
+                            input_source = sanitized_csv
+                except Exception as e:
+                    print(f"Error preparing sanitized CSV: {e}")
                 # Build base command for CSV with csv input-type parameter
                 cmd = [str(self.sldl_path), input_source, '--input-type', 'csv', '--user', username, '--pass', password]
                 if path:
@@ -1518,39 +1607,56 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                 except Exception as e:
                     print(f"Error cleaning up temp file: {e}")
             
-            # Process session logger if it exists
+            # Finalize logs and wishlist based on availability of sldl index file
             if hasattr(self, 'session_logger') and self.session_logger:
                 try:
-                    # If sldl produced an index file, process it
+                    # Determine base download directory
                     if path:
                         download_dir = Path(path)
                     else:
                         download_dir = Path.cwd()
-                    
-                    # Look for sldl index files
+
+                    # Attempt to find and process the most recent sldl index file
+                    processed_log_path = None
                     index_files = list(download_dir.rglob("_index.csv"))
                     if index_files:
-                        # Use the most recent one
                         index_file = max(index_files, key=lambda f: f.stat().st_mtime)
-                        self.session_logger.process_sldl_index_file(str(index_file))
-                        self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                            "appendOutput:", "📝 Processed sldl index file and updated session log\n", False
-                        )
-                    
-                    # Process wishlist updates if enabled
+
+                        # Convert sldl's _index.csv into a human-readable log.csv in the same folder
+                        processor = SLDLCSVProcessor()
+                        if processor.process_csv_file(str(index_file)):
+                            processed_log_path = index_file.parent / 'log.csv'
+                            self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                                "appendOutput:", "📝 Processed sldl index file into log.csv\n", False
+                            )
+
+                            # Delete the initial session log as it's superseded by processed log.csv
+                            try:
+                                if self.session_logger.log_exists():
+                                    session_log_path = Path(self.session_logger.get_log_path())
+                                    if session_log_path.exists():
+                                        session_log_path.unlink()
+                                        self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                                            "appendOutput:", "🧹 Removed initial session log (replaced by processed log.csv)\n", False
+                                        )
+                            except Exception as e:
+                                print(f"Error deleting initial session log: {e}")
+
+                    # Wishlist updates: prefer processed log.csv if available; otherwise fallback to initial session log
                     if self.wishlist_mode_checkbox.state():
-                        log_path = self.session_logger.get_log_path()
-                        if self.session_logger.log_exists():
-                            # Add failed downloads to wishlist
+                        if processed_log_path and processed_log_path.exists():
+                            self.__processFailedDownloadsToWishlist(str(processed_log_path))
+                            self.__removeSuccessfulDownloadsFromWishlist(str(processed_log_path))
+                        elif self.session_logger.log_exists():
+                            log_path = self.session_logger.get_log_path()
                             self.__processFailedDownloadsToWishlist(log_path)
-                            # Remove successful downloads from wishlist
                             self.__removeSuccessfulDownloadsFromWishlist(log_path)
-                    
+
                 except Exception as e:
-                    print(f"Error processing session logger: {e}")
-                
-                # Clear session logger reference
-                self.session_logger = None
+                    print(f"Error finalizing logs: {e}")
+                finally:
+                    # Clear session logger reference
+                    self.session_logger = None
             
             # Re-enable the start button and disable stop button
             self.performSelectorOnMainThread_withObject_waitUntilDone_(
@@ -1565,14 +1671,15 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                 "saveSettings", None, False
             )
 
-            # Handle CSV processing and stopped download logic
+            # Handle stopped download logic (manual index augmentation if needed)
             if self.user_stopped:
-                # For stopped downloads: process CSV first, then append missing tracks
-                self.run_csv_processor()
-                self.generate_manual_index_file()
-            else:
-                # For normal downloads: just process CSV
-                self.run_csv_processor()
+                # Only attempt manual augmentation for playlist sources where we can retrieve tracks
+                try:
+                    selected_source = self.source_popup.titleOfSelectedItem()
+                except Exception:
+                    selected_source = None
+                if selected_source in ["YouTube Playlist", "Spotify Playlist"]:
+                    self.generate_manual_index_file()
 
     def showAlert_message_(self, title, message):
         """Show an alert dialog."""
@@ -1636,6 +1743,13 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                 # Load wishlist mode
                 wishlist_mode = data.get('wishlist_mode', False)
                 self.wishlist_mode_checkbox.setState_(wishlist_mode)
+
+                # Load clean search option
+                clean_search = data.get('clean_search', False)
+                try:
+                    self.clean_search_checkbox.setState_(clean_search)
+                except Exception:
+                    pass
             except Exception:
                 pass
 
@@ -1664,6 +1778,7 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
             'strict_min_bitrate': self.strict_min_bitrate_field.stringValue(),
             'strict_max_bitrate': self.strict_max_bitrate_field.stringValue(),
             'wishlist_mode': bool(self.wishlist_mode_checkbox.state()),
+            'clean_search': bool(self.clean_search_checkbox.state()),
         }
         
         # Only save password if remember password is checked
@@ -1763,12 +1878,10 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
             # Get all tracks that should have been downloaded
             all_tracks = self.__get_playlist_tracks()
             if not all_tracks:
-                self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                    "appendOutput:", "\n❌ Could not retrieve playlist tracks.\n", False
-                )
+                # If we cannot retrieve playlist tracks at this point, silently skip augmentation
                 return
             
-            # Get successfully downloaded tracks from existing processed log
+            # Get successfully downloaded tracks from existing processed log (columns may be pruned)
             successful_tracks = self.__get_successful_tracks_from_processed_log(log_file)
             
             # Find missing tracks
@@ -1959,17 +2072,17 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
             # Read existing data to get fieldnames
             with open(log_path, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
-                fieldnames = reader.fieldnames
-            
+                fieldnames = reader.fieldnames or []
+
             # Append missing tracks
             with open(log_path, 'a', encoding='utf-8', newline='') as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
-                
+
                 for track in missing_tracks:
                     # Parse artist and title from the track string
                     artist = ""
                     title = ""
-                    
+
                     if ' - ' in track:
                         # Format: "Artist - Title"
                         artist, title = track.split(' - ', 1)
@@ -1983,22 +2096,23 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                     else:
                         # Fallback: use the whole track as title
                         title = track
-                    
-                    # Create row with proper human-readable codes
-                    row = {
-                        'filepath': f"{artist} - {title}.mp3",
+
+                    # Build a row using only columns that exist in the processed log
+                    candidate_row = {
                         'artist': artist,
-                        'album': '',
                         'title': title,
-                        'length': '',
-                        'tracktype': '',
-                        'state': '2',  # Failed state code
-                        'failurereason': 'Download cancelled by user',
+                        'state': '2',
+                        'failurereason': '6',
                         'state_description': 'Failed',
                         'failure_description': 'Download cancelled by user'
                     }
-                    
-                    writer.writerow(row)
+                    # Keep only keys present in fieldnames
+                    safe_row = {k: v for k, v in candidate_row.items() if k in fieldnames}
+                    # Ensure any missing columns that exist in fieldnames are present with empty values
+                    for col in fieldnames:
+                        if col not in safe_row:
+                            safe_row[col] = ''
+                    writer.writerow(safe_row)
                     
         except Exception as e:
             print(f"Error appending to processed log file: {e}")
@@ -2315,6 +2429,65 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
         except Exception as e:
             self.showAlert_message_("Error", f"Failed to import wishlist: {str(e)}")
 
+    def importWishlistFromSoulseekQT_(self, sender):
+        """Scan ~/.SoulseekQT for the most recent file, extract wishlist items, and add to wishlist."""
+        try:
+            base_dir = Path.home() / ".SoulseekQT"
+            if not base_dir.exists():
+                self.showAlert_message_("Error", "The directory ~/.SoulseekQT was not found.")
+                return
+            
+            # Recursively find all files and pick the most recently created/modified
+            import os
+            candidates = [p for p in base_dir.rglob('*') if p.is_file()]
+            if not candidates:
+                self.showAlert_message_("Error", "No files found under ~/.SoulseekQT.")
+                return
+            
+            def file_time(path_obj):
+                try:
+                    st = os.stat(path_obj)
+                    # Prefer birth time when available (macOS), fallback to mtime
+                    return getattr(st, 'st_birthtime', st.st_mtime)
+                except Exception:
+                    return 0
+            
+            latest_file = max(candidates, key=file_time)
+            
+            # Use system 'strings' to extract human-readable strings
+            strings_path = "/usr/bin/strings"
+            cmd = [strings_path, str(latest_file)] if Path(strings_path).exists() else ["strings", str(latest_file)]
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            if proc.returncode != 0 or not proc.stdout:
+                self.showAlert_message_("Error", f"Failed to extract text from: {latest_file}")
+                return
+            
+            lines = proc.stdout.splitlines()
+            in_wish_list = False
+            extracted = []
+            for raw in lines:
+                line = raw.strip()
+                if line == "wish_list_item":
+                    in_wish_list = True
+                    continue
+                if line == "is_ignored":
+                    in_wish_list = False
+                    continue
+                if in_wish_list and line:
+                    extracted.append(line)
+            
+            if not extracted:
+                self.showAlert_message_("Info", "No wishlist items were found in the most recent SoulseekQT file.")
+                return
+            
+            added_count = self.__addToWishlist(extracted)
+            if added_count > 0:
+                self.showAlert_message_("Success", f"Imported {added_count} items from SoulseekQT (source: {latest_file.name}).")
+            else:
+                self.showAlert_message_("Info", "No new items to add; all extracted entries already exist in your wishlist.")
+        except Exception as e:
+            self.showAlert_message_("Error", f"Failed to import from SoulseekQT: {str(e)}")
+
     def __loadWishlistItems(self):
         """Load wishlist items from CSV file."""
         items = []
@@ -2357,15 +2530,20 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
             writer = csv.writer(temp_file)
             writer.writerow(['artist', 'title'])  # CSV header
             
+            clean_enabled = bool(self.clean_search_checkbox.state())
             for item in wishlist_items:
                 if ' - ' in item:
                     artist, title = item.split(' - ', 1)
+                    if clean_enabled:
+                        artist = self.__cleanSearchString(artist)
+                        title = self.__cleanSearchString(title)
                     writer.writerow([artist, title])
                     print(f"Wrote CSV row: {artist}, {title}")
                 else:
                     # For items without artist-title format, put in title column
-                    writer.writerow(['', item])
-                    print(f"Wrote CSV row: , {item}")
+                    title_only = self.__cleanSearchString(item) if clean_enabled else item
+                    writer.writerow(['', title_only])
+                    print(f"Wrote CSV row: , {title_only}")
             
             temp_file.close()
             print(f"Created CSV file: {temp_file.name}")
@@ -2384,6 +2562,62 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
             
         except Exception as e:
             print(f"Error creating CSV file from wishlist: {e}")
+            return None
+
+
+    def __cleanSearchString(self, text):
+        """Return a cleaned search string with only ASCII letters, digits, and spaces."""
+        try:
+            if text is None:
+                return ''
+            # Normalize and strip diacritics
+            normalized = unicodedata.normalize('NFKD', str(text))
+            ascii_text = normalized.encode('ascii', 'ignore').decode('ascii')
+            # Replace non-alphanumeric with space, collapse whitespace
+            ascii_text = re.sub(r'[^A-Za-z0-9]+', ' ', ascii_text)
+            ascii_text = re.sub(r'\s+', ' ', ascii_text).strip()
+            return ascii_text
+        except Exception:
+            return str(text)
+
+    def __createSanitizedCopyOfCSV(self, csv_path):
+        """Create a sanitized temporary CSV from the provided CSV file based on checkbox setting."""
+        try:
+            import csv
+            import tempfile
+            with open(csv_path, 'r', newline='', encoding='utf-8') as infile:
+                reader = csv.DictReader(infile)
+                fieldnames = reader.fieldnames or []
+                has_artist_title = 'artist' in fieldnames and 'title' in fieldnames
+                has_track = 'track' in fieldnames
+                temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8', newline='')
+
+                if has_artist_title:
+                    writer = csv.DictWriter(temp_file, fieldnames=['artist', 'title'])
+                    writer.writeheader()
+                    for row in reader:
+                        artist = self.__cleanSearchString(row.get('artist', ''))
+                        title = self.__cleanSearchString(row.get('title', ''))
+                        if artist or title:
+                            writer.writerow({'artist': artist, 'title': title})
+                elif has_track:
+                    writer = csv.DictWriter(temp_file, fieldnames=['track'])
+                    writer.writeheader()
+                    for row in reader:
+                        track = self.__cleanSearchString(row.get('track', ''))
+                        if track:
+                            writer.writerow({'track': track})
+                else:
+                    # Fallback: copy as-is
+                    writer = csv.DictWriter(temp_file, fieldnames=fieldnames)
+                    writer.writeheader()
+                    for row in reader:
+                        writer.writerow(row)
+
+                temp_file.close()
+                return temp_file.name
+        except Exception as e:
+            print(f"Error creating sanitized copy of CSV: {e}")
             return None
 
 

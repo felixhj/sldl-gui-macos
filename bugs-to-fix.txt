@@ -1,3 +1,3 @@
-- status text when wishlist or csv selected as source: 'Logging in' stays visible for too long, we can have a searching / other update before we get the first downloads
-- no warning dialog when user quits if there is a download in progress
 - messy folder creation when using csv or wishlist as sources
+- add auto run wishlist on start feature
+- add the soulseek wishlist import feature

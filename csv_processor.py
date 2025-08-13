@@ -311,25 +311,34 @@ class SLDLCSVProcessor:
             with open(input_path, 'r', newline='', encoding='utf-8') as csvfile:
                 reader = csv.DictReader(csvfile)
                 fieldnames = list(reader.fieldnames) if reader.fieldnames else []
-                
+
+                # Drop unwanted columns from output
+                drop_columns = ['filepath', 'album', 'length', 'tracktype']
+                fieldnames = [f for f in fieldnames if f not in drop_columns]
+
                 # Add new columns for human-readable descriptions
                 if 'state' in fieldnames and 'state_description' not in fieldnames:
                     fieldnames.append('state_description')
                 if 'failurereason' in fieldnames and 'failure_description' not in fieldnames:
                     fieldnames.append('failure_description')
-                
-                # Read all rows and ensure all fields are included in fieldnames
+
+                # Read all rows and sanitize to fieldnames
                 for row in reader:
-                    # Add any missing fields to fieldnames
+                    # Remove dropped columns
+                    for col in drop_columns:
+                        if col in row:
+                            row.pop(col, None)
+
+                    # Ensure we keep track of any new fields (except dropped ones)
                     for field in row.keys():
                         if field not in fieldnames:
                             fieldnames.append(field)
-                    
+
                     # Add state description
                     if 'state' in row and row['state'].isdigit():
                         state_code = int(row['state'])
                         row['state_description'] = self.get_state_description(state_code)
-                    
+
                     # Add failure description
                     if 'failurereason' in row:
                         if row['failurereason'].isdigit():
@@ -338,8 +347,10 @@ class SLDLCSVProcessor:
                         else:
                             # Handle string-based failure reasons (like "Download cancelled by user")
                             row['failure_description'] = row['failurereason']
-                    
-                    rows.append(row)
+
+                    # Sanitize row to only include fieldnames
+                    sanitized_row = {k: row.get(k, '') for k in fieldnames}
+                    rows.append(sanitized_row)
             
             # Write the processed CSV
             with open(output_path, 'w', newline='', encoding='utf-8') as csvfile:
