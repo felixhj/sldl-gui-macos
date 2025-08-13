@@ -1,3 +1,1 @@
 - messy folder creation when using csv or wishlist as sources
-- add auto run wishlist on start feature
-- add the soulseek wishlist import feature
