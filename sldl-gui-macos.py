@@ -17,7 +17,8 @@ from pathlib import Path
 # Application version
 APP_VERSION = "0.3.6"
 
-from csv_processor import SLDLCSVProcessor, SessionLogger
+from csv_processor import SLDLCSVProcessor
+from app.session import SessionFacade
 
 try:
     import objc
@@ -86,7 +87,9 @@ class AppDelegate(NSObject):
         self.download_running = False
         self.user_stopped = False
         self.download_target_dir = None
-        self.session_logger = None  # Will be initialized when download starts
+        self.session_logger = None  # Back-compat; will be replaced by session_facade
+        self.session_facade = None
+        self.sldl_runner = None
 
         
         if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
@@ -113,15 +116,15 @@ class AppDelegate(NSObject):
         try:
             if getattr(self, 'download_running', False):
                 if self.download_running:
-                    alert = NSAlert.alloc().init()
-                    alert.setMessageText_("Quit while session is in progress?")
-                    alert.setInformativeText_(
-                        "A download session is currently in progress. Are you sure you want to quit?"
+                    # Use helper confirm alert
+                    from app.ui_helpers import show_confirm_alert
+                    confirmed = show_confirm_alert(
+                        "Quit while session is in progress?",
+                        "A download session is currently in progress. Are you sure you want to quit?",
+                        ok_title="Quit",
+                        cancel_title="Cancel",
                     )
-                    alert.addButtonWithTitle_("Quit")
-                    alert.addButtonWithTitle_("Cancel")
-                    response = alert.runModal()
-                    if response == NSAlertFirstButtonReturn:
+                    if confirmed:
                         return NSApplicationTerminateNow
                     else:
                         return NSApplicationTerminateCancel
@@ -266,8 +269,9 @@ class AppDelegate(NSObject):
             NSWindowStyleMaskClosable |
             NSWindowStyleMaskResizable
         )
+        from app.constants import WINDOW_WIDTH, WINDOW_HEIGHT, PADDING, CONTROL_HEIGHT, BUTTON_HEIGHT, START_BUTTON_HEIGHT, LABEL_WIDTH, FIELD_Y_SPACING, SECTION_SPACING
         self.window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(100.0, 100.0, 750.0, 680.0),  # Increased height for wishlist controls
+            NSMakeRect(100.0, 100.0, WINDOW_WIDTH, WINDOW_HEIGHT),  # Increased height for wishlist controls
             style,
             NSBackingStoreBuffered,
             False
@@ -277,14 +281,7 @@ class AppDelegate(NSObject):
         self.window.setMinSize_(self.window.frame().size)
         view = self.window.contentView()
         
-        # --- Constants for layout ---
-        PADDING = 20
-        CONTROL_HEIGHT = 24
-        BUTTON_HEIGHT = 24
-        START_BUTTON_HEIGHT = 32
-        LABEL_WIDTH = 200
-        FIELD_Y_SPACING = 40
-        SECTION_SPACING = 60
+        # --- Constants for layout imported from app.constants ---
         
         # --- Top-Down Layout ---
         y = view.frame().size.height - PADDING
@@ -1122,7 +1119,8 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                 return
         else:  # Wishlist
             # Check if internal wishlist has items
-            wishlist_items = self.__loadWishlistItems()
+            from app.wishlist import load_items
+            wishlist_items = load_items()
             if not wishlist_items:
                 self.showAlert_message_("Error", "Your wishlist is empty. Please add some tracks to your wishlist first.")
                 return
@@ -1166,8 +1164,12 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
         self.status_label.setStringValue_("Starting...")
         
         # Start download in background thread
-        thread = threading.Thread(target=self.downloadThread, daemon=True)
-        thread.start()
+        try:
+            from app.threads import run_in_thread
+            run_in_thread(self.downloadThread, name="download")
+        except Exception:
+            thread = threading.Thread(target=self.downloadThread, daemon=True)
+            thread.start()
 
     def stopDownload_(self, sender):
         """Handle stop download button click."""
@@ -1175,28 +1177,33 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
             self.user_stopped = True  # Mark that the user initiated the stop
             
             # Mark remaining tracks as failed in session logger
-            if self.session_logger and self.session_logger.session_started:
-                self.session_logger.mark_remaining_tracks_failed(7)  # Session stopped by user
-                self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                    "appendOutput:", "📝 Marked remaining tracks as failed (session stopped)\n", False
-                )
+            # Mark remaining tracks as failed via facade if logging is active
+            if getattr(self, 'session_facade', None):
+                try:
+                    self.session_facade.mark_remaining_tracks_failed(7)
+                except Exception:
+                    pass
+                from app.ui_helpers import append_output
+                append_output(self, "📝 Marked remaining tracks as failed (session stopped)\n")
             
             try:
-                # Terminate the process
-                self.current_process.terminate()
-                
-                # Wait a bit for graceful termination
+                # Prefer runner-managed graceful stop
+                if getattr(self, 'sldl_runner', None):
+                    try:
+                        self.sldl_runner.stop(graceful_seconds=5.0)
+                    except Exception:
+                        pass
+                else:
+                    # Fallback to process termination
+                    self.current_process.terminate()
                 try:
                     self.current_process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    # Force kill if it doesn't terminate gracefully
                     self.current_process.kill()
                     self.current_process.wait()
-                
             except Exception as e:
-                self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                    "appendOutput:", f"❌ Error stopping download: {str(e)}\n", False
-                )
+                from app.ui_helpers import append_output
+                append_output(self, f"❌ Error stopping download: {str(e)}\n")
             finally:
                 # UI updates are now handled in the downloadThread's finally block
                 self.download_running = False
@@ -1223,19 +1230,20 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                         except Exception as inner_e:
                             print(f"Error deleting incomplete file {file_path}: {inner_e}")
 
+                    from app.ui_helpers import append_output
                     if removed_count > 0:
-                        self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                            "appendOutput:", f"🧹 Removed {removed_count} incomplete files\n", False
-                        )
+                        append_output(self, f"🧹 Removed {removed_count} incomplete files\n")
                     else:
-                        self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                            "appendOutput:", "🧹 No incomplete files to remove\n", False
-                        )
+                        append_output(self, "🧹 No incomplete files to remove\n")
                 except Exception as worker_e:
                     print(f"Error during incomplete files cleanup: {worker_e}")
 
-            thread = threading.Thread(target=_worker, daemon=True)
-            thread.start()
+            try:
+                from app.threads import run_in_thread
+                run_in_thread(_worker, name="cleanup-incomplete")
+            except Exception:
+                thread = threading.Thread(target=_worker, daemon=True)
+                thread.start()
         except Exception as e:
             print(f"Error launching cleanup thread: {e}")
 
@@ -1266,16 +1274,16 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                 # Use CSV file directly with csv input type
                 csv_path = self.csv_field.stringValue().strip()
                 if not csv_path:
-                    self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                        "appendOutput:", "❌ No CSV file specified.\n", False
-                    )
+                    from app.ui_helpers import append_output
+                    append_output(self, "❌ No CSV file specified.\n")
                     return
                 
                 # Pass CSV file to sldl, optionally via a sanitized temporary copy
                 input_source = csv_path
                 try:
                     if self.clean_search_checkbox.state():
-                        sanitized_csv = self.__createSanitizedCopyOfCSV(csv_path)
+                        from app.wishlist import create_sanitized_copy_of_csv
+                        sanitized_csv = create_sanitized_copy_of_csv(csv_path)
                         if sanitized_csv:
                             input_source = sanitized_csv
                 except Exception as e:
@@ -1292,11 +1300,11 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                     cmd.extend(['--path', str(csv_folder)])
             else:  # Wishlist
                 # Create temporary CSV file from wishlist
-                temp_csv_file = self.__createCSVFileFromWishlist()
+                from app.wishlist import create_csv_from_wishlist
+                temp_csv_file = create_csv_from_wishlist(bool(self.clean_search_checkbox.state()))
                 if not temp_csv_file:
-                    self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                        "appendOutput:", "❌ Failed to create CSV file from wishlist.\n", False
-                    )
+                    from app.ui_helpers import append_output
+                    append_output(self, "❌ Failed to create CSV file from wishlist.\n")
                     return
                 
                 # Pass CSV file to sldl
@@ -1373,66 +1381,53 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                 # For wishlist, get tracks from wishlist file
                 tracks_to_download = self.__loadWishlistItems()
             
-            # Initialize session logger if we have tracks
+            # Initialize session logging via facade if we have tracks
             if tracks_to_download:
-                # Determine download directory for session logger
-                if path:
-                    download_dir = Path(path)
-                else:
-                    download_dir = Path.cwd()
-                
-                # Initialize session logger
-                self.session_logger = SessionLogger(str(download_dir))
+                download_dir = Path(path) if path else Path.cwd()
+                self.session_facade = SessionFacade(download_dir)
                 source_type = selected_source.lower().replace(' ', '_')
-                if self.session_logger.start_session(tracks_to_download, source_type):
-                    self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                        "appendOutput:", f"📝 Session logging initialized with {len(tracks_to_download)} tracks\n", False
-                    )
+                if self.session_facade.start(tracks_to_download, source_type):
+                    from app.ui_helpers import append_output
+                    append_output(self, f"📝 Session logging initialized with {len(tracks_to_download)} tracks\n")
                 else:
-                    self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                        "appendOutput:", "⚠️ Failed to initialize session logging\n", False
-                    )
+                    from app.ui_helpers import append_output
+                    append_output(self, "⚠️ Failed to initialize session logging\n")
             
-            # For YouTube and Spotify playlists, get tracks and initialize session logger
+            # For YouTube and Spotify playlists, get tracks and initialize session logging via facade
             if selected_source in ["YouTube Playlist", "Spotify Playlist"]:
-                tracks_to_download = self.__get_playlist_tracks()
+                from app.playlist import get_playlist_tracks
+                def builder():
+                    # Reuse existing internal builders
+                    if selected_source == "CSV File":
+                        return self.__createSldlWishlistFileFromCSV()
+                    else:
+                        return self.__createSldlWishlistFile()
+                src_value = self.playlist_field.stringValue().strip() if selected_source == "YouTube Playlist" else self.spotify_field.stringValue().strip()
+                tracks_to_download = get_playlist_tracks(self.sldl_path, selected_source, src_value, temp_wishlist_builder=builder)
                 if tracks_to_download:
-                    # Determine download directory for session logger
-                    if path:
-                        download_dir = Path(path)
-                    else:
-                        download_dir = Path.cwd()
-                    
-                    # Initialize session logger
-                    self.session_logger = SessionLogger(str(download_dir))
+                    download_dir = Path(path) if path else Path.cwd()
+                    self.session_facade = SessionFacade(download_dir)
                     source_type = selected_source.lower().replace(' ', '_')
-                    if self.session_logger.start_session(tracks_to_download, source_type):
-                        self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                            "appendOutput:", f"📝 Session logging initialized with {len(tracks_to_download)} tracks\n", False
-                        )
+                    if self.session_facade.start(tracks_to_download, source_type):
+                        from app.ui_helpers import append_output
+                        append_output(self, f"📝 Session logging initialized with {len(tracks_to_download)} tracks\n")
                     else:
-                        self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                            "appendOutput:", "⚠️ Failed to initialize session logging\n", False
-                        )
+                        from app.ui_helpers import append_output
+                        append_output(self, "⚠️ Failed to initialize session logging\n")
             
             # Show the command being executed
             cmd_str = " ".join(cmd).replace(password, "***")  # Hide password
-            self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                "appendOutput:", f"Executing: {cmd_str}\n\n", False
-            )
+            from app.ui_helpers import append_output
+            append_output(self, f"Executing: {cmd_str}\n\n")
 
-            # Run the process
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                universal_newlines=True
-            )
-            
-            # Store process reference for stopping
-            self.current_process = process
+            # Run the process via SldlRunner and stream output
+            from app.process import SldlRunner
+            from app.ui_helpers import append_output as _append
+            runner = SldlRunner(self.sldl_path, Path.cwd(),
+                output_callback=lambda line: _append(self, line))
+            runner.start(cmd[1:] if cmd and isinstance(cmd, list) else [])
+            self.current_process = runner.process
+            self.sldl_runner = runner
             
             # Store temp file for cleanup (if wishlist source)
             temp_file_to_cleanup = None
@@ -1445,8 +1440,9 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                     initial_total_tracks = len(wishlist_items)
                     if initial_total_tracks > 0:
                         # Set initial progress for wishlist
-                        self.performSelectorOnMainThread_withObject_waitUntilDone_("switchToDeterminateProgress:", float(initial_total_tracks), False)
-                        self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", f"Processing {initial_total_tracks} wishlist items...", False)
+                        from app.ui_helpers import switch_to_determinate, update_status
+                        switch_to_determinate(self, float(initial_total_tracks))
+                        update_status(self, f"Processing {initial_total_tracks} wishlist items...")
                 except:
                     pass  # Fall back to dynamic detection
             elif selected_source == "CSV File":
@@ -1465,8 +1461,9 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                     initial_total_tracks = len(csv_items)
                     if initial_total_tracks > 0:
                         # Set initial progress for CSV file
-                        self.performSelectorOnMainThread_withObject_waitUntilDone_("switchToDeterminateProgress:", float(initial_total_tracks), False)
-                        self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", f"Processing {initial_total_tracks} CSV items...", False)
+                        from app.ui_helpers import switch_to_determinate, update_status
+                        switch_to_determinate(self, float(initial_total_tracks))
+                        update_status(self, f"Processing {initial_total_tracks} CSV items...")
                 except:
                     pass  # Fall back to dynamic detection
 
@@ -1475,128 +1472,121 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
             failed_count = 0
             searching_count = 0
             
-            for line in process.stdout:
-                # Check if download was stopped
-                if not self.download_running:
-                    break
+            # Consume output already streamed via callback, but drive progress using runner.process stdout if available
+            proc = runner.process
+            stdout_iter = getattr(proc, 'stdout', None)
+            if stdout_iter is not None:
+                for line in stdout_iter:
+                    # Check if download was stopped
+                    if not self.download_running:
+                        break
                     
-                # Filter out verbose logs that aren't useful to the user
-                # Skip very verbose download-related logs that clutter the output
-                if (line.startswith("Downloading") and "tracks:" not in line) or \
-                   line.strip() == "":
-                    # Still count these for progress tracking but don't display them
-                    pass
-                else:
-                    # Update output on main thread for important messages
-                    self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                        "appendOutput:", line, False
-                    )
+                    # Filter out verbose logs that aren't useful to the user
+                    if (line.startswith("Downloading") and "tracks:" not in line) or line.strip() == "":
+                        pass
                 
-                # --- Final progress logic based on user feedback ---
-                
-                # Update status based on various log messages
-                if "Loading YouTube playlist" in line or "Loading Spotify playlist" in line:
-                    self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", "Loading playlist...", False)
-                elif line.startswith("Login"):
-                    self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", "Logging in...", False)
-                elif selected_source == "Wishlist" and "Loading" in line:
-                    # For wishlist, show loading status when processing the list
-                    self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", "Loading wishlist...", False)
-                elif selected_source == "CSV File" and "Processing" in line:
-                    # For CSV file, show processing status
-                    self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", "Processing CSV items...", False)
+                    # --- Final progress logic based on user feedback ---
+                    if "Loading YouTube playlist" in line or "Loading Spotify playlist" in line:
+                        from app.ui_helpers import update_status
+                        update_status(self, "Loading playlist...")
+                    elif line.startswith("Login"):
+                        from app.ui_helpers import update_status
+                        update_status(self, "Logging in...")
+                    elif selected_source == "Wishlist" and "Loading" in line:
+                        from app.ui_helpers import update_status
+                        update_status(self, "Loading wishlist...")
+                    elif selected_source == "CSV File" and "Processing" in line:
+                        from app.ui_helpers import update_status
+                        update_status(self, "Processing CSV items...")
 
-                # Get total tracks and set the max progress bar value
-                # Handle both playlist and wishlist formats
-                total_match = re.search(r'Downloading (\d+) tracks:', line)
-                if total_match:
-                    total_tracks = int(total_match.group(1))
-                    if total_tracks > 0:
-                        max_steps = float(total_tracks)
-                        self.performSelectorOnMainThread_withObject_waitUntilDone_("switchToDeterminateProgress:", max_steps, False)
-                    continue
-                
-                # For wishlist, if we haven't found total tracks yet, try to estimate from wishlist items
-                if selected_source == "Wishlist" and total_tracks == 0:
-                    # Try to get total tracks from wishlist processing messages
-                    wishlist_total_match = re.search(r'Processing (\d+) items', line)
-                    if wishlist_total_match:
-                        total_tracks = int(wishlist_total_match.group(1))
+                    total_match = re.search(r'Downloading (\d+) tracks:', line)
+                    if total_match:
+                        total_tracks = int(total_match.group(1))
                         if total_tracks > 0:
                             max_steps = float(total_tracks)
-                            self.performSelectorOnMainThread_withObject_waitUntilDone_("switchToDeterminateProgress:", max_steps, False)
+                            from app.ui_helpers import switch_to_determinate
+                            switch_to_determinate(self, max_steps)
                         continue
-
-                # --- Track successful downloads for progress ---
-                if line.startswith("Searching:"):
-                    searching_count += 1
-                    # Don't update progress bar during searching phase
-                    continue
-                elif (selected_source == "Wishlist" or selected_source == "CSV File") and "Searching for" in line:
-                    # For wishlist and CSV file, show when we start searching for individual items
-                    if total_tracks > 0:
-                        current_step = float(searching_count + 1)
-                        status_message = f"Searching item {searching_count + 1}/{total_tracks}"
-                        self.performSelectorOnMainThread_withObject_waitUntilDone_("updateProgressAndStatus:", (current_step, status_message), False)
-                    searching_count += 1
-                    continue
                 
-                elif line.startswith("Succeeded:"):
-                    succeeded_count += 1
-                    
-                    # Update progress bar and status with successful downloads
-                    if total_tracks > 0:
-                        current_step = float(succeeded_count)
-                        status_message = f"{succeeded_count}/{total_tracks} downloaded"
-                        self.performSelectorOnMainThread_withObject_waitUntilDone_("updateProgressAndStatus:", (current_step, status_message), False)
-                    continue
+                    if selected_source == "Wishlist" and total_tracks == 0:
+                        wishlist_total_match = re.search(r'Processing (\d+) items', line)
+                        if wishlist_total_match:
+                            total_tracks = int(wishlist_total_match.group(1))
+                            if total_tracks > 0:
+                                max_steps = float(total_tracks)
+                                from app.ui_helpers import switch_to_determinate
+                                switch_to_determinate(self, max_steps)
+                            continue
 
-                elif line.startswith("All downloads failed:"):
-                    failed_count += 1
-                    # Don't update progress bar for failed downloads, just count them
-                    continue
+                    if line.startswith("Searching:"):
+                        searching_count += 1
+                        continue
+                    elif (selected_source == "Wishlist" or selected_source == "CSV File") and "Searching for" in line:
+                        if total_tracks > 0:
+                            current_step = float(searching_count + 1)
+                            status_message = f"Searching item {searching_count + 1}/{total_tracks}"
+                            from app.ui_helpers import update_progress_and_status
+                            update_progress_and_status(self, (current_step, status_message))
+                        searching_count += 1
+                        continue
+                    elif line.startswith("Succeeded:"):
+                        succeeded_count += 1
+                        if total_tracks > 0:
+                            current_step = float(succeeded_count)
+                            status_message = f"{succeeded_count}/{total_tracks} downloaded"
+                            from app.ui_helpers import update_progress_and_status
+                            update_progress_and_status(self, (current_step, status_message))
+                        continue
+                    elif line.startswith("All downloads failed:"):
+                        failed_count += 1
+                        continue
+                    completed_match = re.search(r'Completed: (.*)', line)
+                    if completed_match:
+                        summary = completed_match.group(1).strip()
+                        from app.ui_helpers import update_status
+                        update_status(self, f"Finished: {summary}")
+                        continue
                 
-                # Get final completion summary from the log
-                completed_match = re.search(r'Completed: (.*)', line)
-                if completed_match:
-                    summary = completed_match.group(1).strip()
-                    self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", f"Finished: {summary}", False)
-                    continue
 
             # Wait for process to complete (only if not stopped)
-            if self.download_running:
-                return_code = process.wait()
+            if self.download_running and runner.process is not None:
+                return_code = runner.wait()
             else:
                 return_code = -1  # Indicate stopped by user
             
             # Reset the progress indicator state
-            self.performSelectorOnMainThread_withObject_waitUntilDone_("resetProgressIndicator", None, False)
+            from app.ui_helpers import reset_progress
+            reset_progress(self)
 
             # The progress bar's final state is now accurate. No need to force it.
             
             if return_code == -1 or self.user_stopped:
                 # Download was stopped by user
-                self.performSelectorOnMainThread_withObject_waitUntilDone_("appendOutput:", "\n🛑 User stopped download.\n", False)
-                self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", "Download stopped", False)
+                from app.ui_helpers import append_output, update_status
+                append_output(self, "\n🛑 User stopped download.\n")
+                update_status(self, "Download stopped")
             elif return_code == 0:
                 if failed_count == 0 and total_tracks > 0:
-                    self.performSelectorOnMainThread_withObject_waitUntilDone_("appendOutput:", "\n✅ Download completed successfully!\n", False)
+                    from app.ui_helpers import append_output
+                    append_output(self, "\n✅ Download completed successfully!\n")
                 elif total_tracks > 0:
-                    self.performSelectorOnMainThread_withObject_waitUntilDone_("appendOutput:", f"\nℹ️ Download finished: {succeeded_count} succeeded, {failed_count} failed.\n", False)
+                    from app.ui_helpers import append_output
+                    append_output(self, f"\nℹ️ Download finished: {succeeded_count} succeeded, {failed_count} failed.\n")
                 # Handle cases where no tracks were found
             else:
-                self.performSelectorOnMainThread_withObject_waitUntilDone_("appendOutput:", f"\n❌ Download failed with code {return_code}\n", False)
-                self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", "Download failed", False)
+                from app.ui_helpers import append_output, update_status
+                append_output(self, f"\n❌ Download failed with code {return_code}\n")
+                update_status(self, "Download failed")
 
         except Exception as e:
-            self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                "appendOutput:", f"\n❌ Error: {str(e)}\n", False
-            )
-            self.performSelectorOnMainThread_withObject_waitUntilDone_("updateStatusText:", "An error occurred", False)
+            from app.ui_helpers import append_output, update_status
+            append_output(self, f"\n❌ Error: {str(e)}\n")
+            update_status(self, "An error occurred")
         
         finally:
             # Reset process reference and UI state
             self.current_process = None
+            self.sldl_runner = None
             self.download_running = False
             
             # Clean up temporary wishlist file if it exists
@@ -1608,7 +1598,8 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                     print(f"Error cleaning up temp file: {e}")
             
             # Finalize logs and wishlist based on availability of sldl index file
-            if hasattr(self, 'session_logger') and self.session_logger:
+            # Finalize logs via session facade if active
+            if getattr(self, 'session_facade', None):
                 try:
                     # Determine base download directory
                     if path:
@@ -1623,53 +1614,45 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                         index_file = max(index_files, key=lambda f: f.stat().st_mtime)
 
                         # Convert sldl's _index.csv into a human-readable log.csv in the same folder
-                        processor = SLDLCSVProcessor()
-                        if processor.process_csv_file(str(index_file)):
-                            processed_log_path = index_file.parent / 'log.csv'
-                            self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                                "appendOutput:", "📝 Processed sldl index file into log.csv\n", False
-                            )
-
-                            # Delete the initial session log as it's superseded by processed log.csv
-                            try:
-                                if self.session_logger.log_exists():
-                                    session_log_path = Path(self.session_logger.get_log_path())
-                                    if session_log_path.exists():
-                                        session_log_path.unlink()
-                                        self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                                            "appendOutput:", "🧹 Removed initial session log (replaced by processed log.csv)\n", False
-                                        )
-                            except Exception as e:
-                                print(f"Error deleting initial session log: {e}")
+                        processed = self.session_facade.finalize_and_prefer_processed(str(index_file))
+                        if processed:
+                            processed_log_path = processed
+                            from app.ui_helpers import append_output
+                            append_output(self, "📝 Processed sldl index file into log.csv\n")
 
                     # Wishlist updates: prefer processed log.csv if available; otherwise fallback to initial session log
                     if self.wishlist_mode_checkbox.state():
                         if processed_log_path and processed_log_path.exists():
                             self.__processFailedDownloadsToWishlist(str(processed_log_path))
                             self.__removeSuccessfulDownloadsFromWishlist(str(processed_log_path))
-                        elif self.session_logger.log_exists():
-                            log_path = self.session_logger.get_log_path()
+                        elif self.session_facade.log_exists():
+                            log_path = self.session_facade.get_log_path()
                             self.__processFailedDownloadsToWishlist(log_path)
                             self.__removeSuccessfulDownloadsFromWishlist(log_path)
 
                 except Exception as e:
                     print(f"Error finalizing logs: {e}")
                 finally:
-                    # Clear session logger reference
-                    self.session_logger = None
+                    # Clear session facade reference
+                    self.session_facade = None
             
             # Re-enable the start button and disable stop button
-            self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                "enableStartButton:", True, False
-            )
-            self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                "enableStopButton:", False, False
-            )
+            from app.ui_helpers import enable_start_button
+            enable_start_button(self, True)
+            try:
+                self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "enableStopButton:", False, False
+                )
+            except Exception:
+                pass
             
             # Save settings
-            self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                "saveSettings", None, False
-            )
+            try:
+                self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "saveSettings", None, False
+                )
+            except Exception:
+                pass
 
             # Handle stopped download logic (manual index augmentation if needed)
             if self.user_stopped:
@@ -1683,75 +1666,48 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
 
     def showAlert_message_(self, title, message):
         """Show an alert dialog."""
-        alert = NSAlert.alloc().init()
-        alert.setMessageText_(title)
-        alert.setInformativeText_(message)
-        alert.addButtonWithTitle_("OK")
-        alert.runModal()
+        try:
+            from app.ui_helpers import show_info_alert
+            show_info_alert(title, message)
+        except Exception:
+            pass
 
     def loadSettings(self):
         """Load saved settings from file."""
-        if SETTINGS_FILE.exists():
+        try:
+            from app.settings import Settings
+            s = Settings.load()
+            # Source selection
+            self.source_popup.selectItemWithTitle_(s.selected_source)
+            self.sourceChanged_(None)
+            # URLs/paths
+            self.playlist_field.setStringValue_(s.playlist_url)
+            self.spotify_field.setStringValue_(s.spotify_url)
+            self.csv_field.setStringValue_(s.csv_file_path)
+            self.user_field.setStringValue_(s.username)
+            self.path_field.setStringValue_(s.download_path)
+            # Password and remember flag
+            self.remember_password_checkbox.setState_(s.remember_password)
+            if s.remember_password:
+                self.pass_field.setStringValue_(s.password)
+            # Port and concurrency
+            self.port_field.setStringValue_(s.listen_port)
+            self.concurrent_popup.selectItemWithTitle_(s.concurrent_downloads)
+            # Formats and bitrates
+            self.pref_format_popup.selectItemWithTitle_(s.pref_format)
+            self.strict_format_popup.selectItemWithTitle_(s.strict_format)
+            self.pref_min_bitrate_field.setStringValue_(s.pref_min_bitrate)
+            self.pref_max_bitrate_field.setStringValue_(s.pref_max_bitrate)
+            self.strict_min_bitrate_field.setStringValue_(s.strict_min_bitrate)
+            self.strict_max_bitrate_field.setStringValue_(s.strict_max_bitrate)
+            # Feature toggles
+            self.wishlist_mode_checkbox.setState_(s.wishlist_mode)
             try:
-                with open(SETTINGS_FILE, 'r') as f:
-                    data = json.load(f)
-                
-                # Load source selection
-                selected_source = data.get('selected_source', 'YouTube Playlist')
-                if selected_source in ["YouTube Playlist", "Spotify Playlist", "Wishlist", "CSV File"]:
-                    self.source_popup.selectItemWithTitle_(selected_source)
-                    self.sourceChanged_(None)  # Update UI visibility
-                
-                # Load URLs
-                self.playlist_field.setStringValue_(data.get('playlist_url', ''))
-                self.spotify_field.setStringValue_(data.get('spotify_url', ''))
-                self.csv_field.setStringValue_(data.get('csv_file_path', ''))
-                
-                self.user_field.setStringValue_(data.get('username', ''))
-                self.path_field.setStringValue_(data.get('download_path', ''))
-                
-                # Load remember password checkbox state
-                remember_password = data.get('remember_password', False)
-                self.remember_password_checkbox.setState_(remember_password)
-                
-                # Only load password if remember password was checked
-                if remember_password:
-                    self.pass_field.setStringValue_(data.get('password', ''))
-                
-                # Load port
-                self.port_field.setStringValue_(data.get('listen_port', ''))
-                
-                # Load concurrent downloads
-                concurrent_downloads = data.get('concurrent_downloads', '2')
-                if concurrent_downloads in ["1", "2", "3", "4"]:
-                    self.concurrent_popup.selectItemWithTitle_(concurrent_downloads)
-
-                # Load format/quality settings
-                if 'pref_format' in data:
-                    self.pref_format_popup.selectItemWithTitle_(data['pref_format'])
-                if 'strict_format' in data:
-                    self.strict_format_popup.selectItemWithTitle_(data['strict_format'])
-                if 'pref_min_bitrate' in data:
-                    self.pref_min_bitrate_field.setStringValue_(str(data['pref_min_bitrate']))
-                if 'pref_max_bitrate' in data:
-                    self.pref_max_bitrate_field.setStringValue_(str(data['pref_max_bitrate']))
-                if 'strict_min_bitrate' in data:
-                    self.strict_min_bitrate_field.setStringValue_(str(data['strict_min_bitrate']))
-                if 'strict_max_bitrate' in data:
-                    self.strict_max_bitrate_field.setStringValue_(str(data['strict_max_bitrate']))
-                
-                # Load wishlist mode
-                wishlist_mode = data.get('wishlist_mode', False)
-                self.wishlist_mode_checkbox.setState_(wishlist_mode)
-
-                # Load clean search option
-                clean_search = data.get('clean_search', False)
-                try:
-                    self.clean_search_checkbox.setState_(clean_search)
-                except Exception:
-                    pass
+                self.clean_search_checkbox.setState_(s.clean_search)
             except Exception:
                 pass
+        except Exception:
+            pass
 
     def load_settings(self):
         """Public method to load settings."""
@@ -1759,34 +1715,30 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
 
     def saveSettings(self):
         """Save current settings to file."""
-        remember_password = bool(self.remember_password_checkbox.state())
-        
-        data = {
-            'selected_source': self.source_popup.titleOfSelectedItem(),
-            'playlist_url': self.playlist_field.stringValue(),
-            'spotify_url': self.spotify_field.stringValue(),
-            'csv_file_path': self.csv_field.stringValue(),
-            'username': self.user_field.stringValue(),
-            'download_path': self.path_field.stringValue(),
-            'remember_password': remember_password,
-            'listen_port': self.port_field.stringValue(),
-            'concurrent_downloads': self.concurrent_popup.titleOfSelectedItem(),
-            'pref_format': self.pref_format_popup.titleOfSelectedItem(),
-            'strict_format': self.strict_format_popup.titleOfSelectedItem(),
-            'pref_min_bitrate': self.pref_min_bitrate_field.stringValue(),
-            'pref_max_bitrate': self.pref_max_bitrate_field.stringValue(),
-            'strict_min_bitrate': self.strict_min_bitrate_field.stringValue(),
-            'strict_max_bitrate': self.strict_max_bitrate_field.stringValue(),
-            'wishlist_mode': bool(self.wishlist_mode_checkbox.state()),
-            'clean_search': bool(self.clean_search_checkbox.state()),
-        }
-        
-        # Only save password if remember password is checked
-        if remember_password:
-            data['password'] = self.pass_field.stringValue()
         try:
-            with open(SETTINGS_FILE, 'w') as f:
-                json.dump(data, f, indent=2)
+            from app.settings import Settings
+            s = Settings(
+                selected_source=self.source_popup.titleOfSelectedItem(),
+                playlist_url=self.playlist_field.stringValue(),
+                spotify_url=self.spotify_field.stringValue(),
+                csv_file_path=self.csv_field.stringValue(),
+                username=self.user_field.stringValue(),
+                remember_password=bool(self.remember_password_checkbox.state()),
+                password=self.pass_field.stringValue() if bool(self.remember_password_checkbox.state()) else "",
+                download_path=self.path_field.stringValue(),
+                listen_port=self.port_field.stringValue(),
+                concurrent_downloads=self.concurrent_popup.titleOfSelectedItem(),
+                pref_format=self.pref_format_popup.titleOfSelectedItem(),
+                strict_format=self.strict_format_popup.titleOfSelectedItem(),
+                pref_min_bitrate=self.pref_min_bitrate_field.stringValue(),
+                pref_max_bitrate=self.pref_max_bitrate_field.stringValue(),
+                strict_min_bitrate=self.strict_min_bitrate_field.stringValue(),
+                strict_max_bitrate=self.strict_max_bitrate_field.stringValue(),
+                wishlist_mode=bool(self.wishlist_mode_checkbox.state()),
+                clean_search=bool(self.clean_search_checkbox.state()),
+            )
+            s.validate()
+            s.save()
         except Exception:
             pass
 
@@ -1796,9 +1748,8 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
 
     def run_csv_processor(self):
         """Find the latest _index.csv and process it."""
-        self.performSelectorOnMainThread_withObject_waitUntilDone_(
-            "updateStatusText:", "Processing CSV output...", False
-        )
+        from app.ui_helpers import update_status
+        update_status(self, "Processing CSV output...")
 
         try:
             download_path_str = self.path_field.stringValue().strip()
@@ -1814,9 +1765,8 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
             # Find the most recent sldl index file
             index_files = list(download_path.rglob("_index.csv"))
             if not index_files:
-                self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                    "updateStatusText:", "CSV to process not found", False
-                )
+                from app.ui_helpers import update_status
+                update_status(self, "CSV to process not found")
                 return
             
             # Use the most recent one
@@ -1835,31 +1785,26 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                         # Remove successful downloads from wishlist
                         self.__removeSuccessfulDownloadsFromWishlist(str(log_path))
                 
-                self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                    "updateStatusText:", "Complete", False
-                )
+                from app.ui_helpers import update_status
+                update_status(self, "Complete")
             else:
-                self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                    "updateStatusText:", "CSV processing failed.", False
-                )
+                from app.ui_helpers import update_status
+                update_status(self, "CSV processing failed.")
 
         except Exception as e:
             print(f"An error occurred during CSV processing: {e}")
-            self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                "updateStatusText:", "CSV processing error.", False
-            )
+            from app.ui_helpers import update_status
+            update_status(self, "CSV processing error.")
 
     def generate_manual_index_file(self):
         """Generate an index file manually when a download is stopped prematurely."""
-        self.performSelectorOnMainThread_withObject_waitUntilDone_(
-            "updateStatusText:", "Generating index for stopped download...", False
-        )
+        from app.ui_helpers import update_status
+        update_status(self, "Generating index for stopped download...")
         
         try:
             if not self.download_target_dir:
-                self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                    "appendOutput:", f"\n❌ Download target directory not set.\n", False
-                )
+                from app.ui_helpers import append_output
+                append_output(self, f"\n❌ Download target directory not set.\n")
                 return
 
 
@@ -1867,9 +1812,8 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
             # Find the most recent processed CSV file (created by CSV processor)
             csv_files = list(self.download_target_dir.rglob("*.csv"))
             if not csv_files:
-                self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                    "appendOutput:", f"\n❌ No processed CSV file found to append to.\n", False
-                )
+                from app.ui_helpers import append_output
+                append_output(self, f"\n❌ No processed CSV file found to append to.\n")
                 return
             
             # Use the most recent one
@@ -1888,9 +1832,8 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
             missing_tracks = [track for track in all_tracks if track not in successful_tracks]
             
             if not missing_tracks:
-                self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                    "appendOutput:", "\n✅ All tracks were successfully downloaded.\n", False
-                )
+                from app.ui_helpers import append_output
+                append_output(self, "\n✅ All tracks were successfully downloaded.\n")
                 return
             
             # Append missing tracks to the processed log file
@@ -1904,14 +1847,12 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                     # Remove successful downloads from wishlist
                     self.__removeSuccessfulDownloadsFromWishlist(str(log_file))
             
-            self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                "updateStatusText:", "Stopped", False
-            )
+            from app.ui_helpers import update_status
+            update_status(self, "Stopped")
 
         except Exception as e:
-            self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                "appendOutput:", f"\n❌ Error generating manual index file: {str(e)}\n", False
-            )
+            from app.ui_helpers import append_output
+            append_output(self, f"\n❌ Error generating manual index file: {str(e)}\n")
 
     def __get_playlist_tracks(self):
         """Get all tracks from the current playlist source."""
@@ -2155,15 +2096,18 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
             return
         
         # Start the CSV export process in a background thread
-        thread = threading.Thread(target=self.__exportPlaylistToCSV, args=(playlist_url, selected_source, download_path), daemon=True)
-        thread.start()
+        try:
+            from app.threads import run_in_thread
+            run_in_thread(lambda: self.__exportPlaylistToCSV(playlist_url, selected_source, download_path), name="export-csv")
+        except Exception:
+            thread = threading.Thread(target=self.__exportPlaylistToCSV, args=(playlist_url, selected_source, download_path), daemon=True)
+            thread.start()
 
     def __exportPlaylistToCSV(self, playlist_url, source_type, target_directory):
         """Export playlist to CSV file in background thread."""
         try:
-            self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                "updateStatusText:", f"Exporting {source_type} to CSV...", False
-            )
+            from app.ui_helpers import update_status, append_output
+            update_status(self, f"Exporting {source_type} to CSV...")
             
             # Generate filename based on source type and current timestamp
             import datetime
@@ -2176,160 +2120,26 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
             csv_path = target_directory / filename
             
             # Use sldl for both YouTube and Spotify playlists
+            from app.playlist import export_youtube_playlist_to_csv, export_spotify_playlist_to_csv
             if source_type == "YouTube Playlist":
-                success = self.__exportYouTubePlaylistToCSV(playlist_url, csv_path)
+                success = export_youtube_playlist_to_csv(self.sldl_path, playlist_url, csv_path)
             else:
-                # Note: Spotify playlists may require authentication for private playlists
-                success = self.__exportSpotifyPlaylistToCSV(playlist_url, csv_path)
+                success = export_spotify_playlist_to_csv(self.sldl_path, playlist_url, csv_path)
             
             if success:
-                self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                    "updateStatusText:", f"CSV exported to: {csv_path}", False
-                )
-                self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                    "appendOutput:", f"\n✅ CSV exported successfully to: {csv_path}\n", False
-                )
+                update_status(self, f"CSV exported to: {csv_path}")
+                append_output(self, f"\n✅ CSV exported successfully to: {csv_path}\n")
             else:
-                self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                    "updateStatusText:", "CSV export failed", False
-                )
-                self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                    "appendOutput:", f"\n❌ Failed to export CSV\n", False
-                )
+                update_status(self, "CSV export failed")
+                append_output(self, f"\n❌ Failed to export CSV\n")
                 
         except Exception as e:
-            self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                "updateStatusText:", f"CSV export error: {str(e)}", False
-            )
-            self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                "appendOutput:", f"\n❌ CSV export error: {str(e)}\n", False
-            )
+            update_status(self, f"CSV export error: {str(e)}")
+            append_output(self, f"\n❌ CSV export error: {str(e)}\n")
 
-    def __exportYouTubePlaylistToCSV(self, playlist_url, csv_path):
-        """Export YouTube playlist to CSV using sldl."""
-        try:
-            # Use sldl to get playlist tracks without downloading
-            cmd = [str(self.sldl_path), playlist_url, '--print', 'tracks']
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            
-            # Parse the output and create CSV
-            import csv
-            tracks = []
-            
-            for line in result.stdout.strip().split('\n'):
-                if line.strip():
-                    # sldl output format: "Artist - Title (duration)"
-                    # Example: "Yes Theory - I Explored A $200,000,000 Forgotten Space Colony (969s)"
-                    if ' - ' in line and '(' in line and ')' in line:
-                        # Extract artist and title
-                        artist_title_part = line.split(' (')[0]
-                        if ' - ' in artist_title_part:
-                            artist, title = artist_title_part.split(' - ', 1)
-                            
-                            # Extract duration (remove 's' suffix and convert to MM:SS)
-                            duration_match = re.search(r'\((\d+)s\)', line)
-                            duration_formatted = ""
-                            if duration_match:
-                                duration_seconds = int(duration_match.group(1))
-                                duration_minutes = duration_seconds // 60
-                                duration_remaining_seconds = duration_seconds % 60
-                                duration_formatted = f"{duration_minutes}:{duration_remaining_seconds:02d}"
-                            
-                            tracks.append({
-                                'title': title.strip(),
-                                'artist': artist.strip(),
-                                'duration': duration_formatted,
-                                'url': playlist_url,  # Use the playlist URL as the source
-                                'uploader': artist.strip()  # Use artist as uploader
-                            })
-            
-            # Write to CSV
-            with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
-                fieldnames = ['title', 'artist', 'duration', 'url', 'uploader']
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(tracks)
-            
-            return True
-            
-        except subprocess.CalledProcessError as e:
-            error_msg = e.stderr if e.stderr else str(e)
-            self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                "appendOutput:", f"❌ sldl error: {error_msg}\n", False
-            )
-            return False
-        except Exception as e:
-            self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                "appendOutput:", f"❌ YouTube export error: {str(e)}\n", False
-            )
-            return False
+    
 
-    def __exportSpotifyPlaylistToCSV(self, playlist_url, csv_path):
-        """Export Spotify playlist to CSV using sldl."""
-        try:
-            # Use sldl to get playlist tracks without downloading
-            cmd = [str(self.sldl_path), playlist_url, '--print', 'tracks']
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            
-            # Parse the output and create CSV
-            import csv
-            tracks = []
-            
-            for line in result.stdout.strip().split('\n'):
-                if line.strip():
-                    # sldl output format: "Artist - Title" or "Title - Artist"
-                    # We'll parse this as best we can
-                    if ' - ' in line:
-                        parts = line.split(' - ', 1)
-                        if len(parts) == 2:
-                            # Try to determine which is artist and which is title
-                            # This is a simple heuristic - could be improved
-                            artist, title = parts[0].strip(), parts[1].strip()
-                            
-                            # Strip duration from title (e.g., "Song Name (148s)" -> "Song Name")
-                            title_clean = re.sub(r'\s*\(\d+s\)$', '', title)
-                            
-                            tracks.append({
-                                'title': title_clean,
-                                'artist': artist,
-                                'album': '',  # sldl doesn't provide album info in track listing
-                                'duration': '',  # sldl doesn't provide duration in track listing
-                                'url': playlist_url  # Use the playlist URL as the source
-                            })
-            
-            # Write to CSV
-            with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
-                fieldnames = ['title', 'artist', 'album', 'duration', 'url']
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(tracks)
-            
-            return True
-            
-        except subprocess.CalledProcessError as e:
-            error_msg = e.stderr if e.stderr else str(e)
-            
-            # Check for specific Spotify authentication errors
-            if "not found" in error_msg.lower() and "private" in error_msg.lower():
-                self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                    "appendOutput:", "❌ Spotify playlist not found or is private. Spotify playlists require authentication.\n", False
-                )
-            elif "invalid_client" in error_msg.lower():
-                self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                    "appendOutput:", "❌ Spotify authentication failed. The playlist may be private or require valid credentials.\n", False
-                )
-            else:
-                self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                    "appendOutput:", f"❌ sldl error: {error_msg}\n", False
-                )
-            return False
-        except Exception as e:
-            self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                "appendOutput:", f"❌ Spotify export error: {str(e)}\n", False
-            )
-            return False
+    
 
     def check_for_updates_async(self):
         """Check for updates in a background thread to avoid blocking the UI."""
@@ -2342,7 +2152,11 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                 )
         
         # Start update check in background thread
-        threading.Thread(target=update_check_thread, daemon=True).start()
+        try:
+            from app.threads import run_in_thread
+            run_in_thread(update_check_thread, name="update-check")
+        except Exception:
+            threading.Thread(target=update_check_thread, daemon=True).start()
 
 
 
@@ -2360,7 +2174,8 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                 )
                 return
             
-            wishlist_items = self.__loadWishlistItems()
+            from app.wishlist import load_items
+            wishlist_items = load_items()
             if not wishlist_items:
                 self.showAlert_message_("Wishlist", "Your wishlist is empty.")
                 return
@@ -2370,16 +2185,9 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
             for item in wishlist_items:
                 content += f"{item}\n"
             
-            # Create alert with scrollable text
-            alert = NSAlert.alloc().init()
-            alert.setMessageText_("Wishlist Contents")
-            alert.setInformativeText_(content)
-            alert.addButtonWithTitle_("Close")
-            
-            # Set alert style to informational
-            alert.setAlertStyle_(1)  # NSAlertStyleInformational
-            
-            alert.runModal()
+            # Show wishlist contents via info alert
+            from app.ui_helpers import show_info_alert
+            show_info_alert("Wishlist Contents", content)
                 
         except Exception as e:
             self.showAlert_message_("Error", f"Failed to view wishlist: {str(e)}")
@@ -2391,21 +2199,18 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
     def clearWishlist_(self, sender):
         """Handle clear button click with confirmation dialog."""
         try:
-            # Show confirmation dialog
-            alert = NSAlert.alloc().init()
-            alert.setMessageText_("Clear Wishlist")
-            alert.setInformativeText_("Are you sure? This will irreversibly delete all entries from your wishlist.")
-            alert.addButtonWithTitle_("Cancel")
-            alert.addButtonWithTitle_("Clear")
-            
-            # Set alert style to warning
-            alert.setAlertStyle_(2)  # NSAlertStyleWarning
-            
-            response = alert.runModal()
-            if response == NSAlertSecondButtonReturn:  # Clear button
+            from app.ui_helpers import show_confirm_alert, show_info_alert
+            confirmed = show_confirm_alert(
+                "Clear Wishlist",
+                "Are you sure? This will irreversibly delete all entries from your wishlist.",
+                ok_title="Clear",
+                cancel_title="Cancel",
+            )
+            if confirmed:
                 # Clear the wishlist
-                self.__saveWishlistItems([])
-                self.showAlert_message_("Success", "Wishlist has been cleared.")
+                from app.wishlist import save_items
+                save_items([])
+                show_info_alert("Success", "Wishlist has been cleared.")
                 
         except Exception as e:
             self.showAlert_message_("Error", f"Failed to clear wishlist: {str(e)}")
@@ -2480,7 +2285,8 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                 self.showAlert_message_("Info", "No wishlist items were found in the most recent SoulseekQT file.")
                 return
             
-            added_count = self.__addToWishlist(extracted)
+            from app.wishlist import add_items
+            added_count = add_items(extracted)
             if added_count > 0:
                 self.showAlert_message_("Success", f"Imported {added_count} items from SoulseekQT (source: {latest_file.name}).")
             else:
@@ -2740,7 +2546,8 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                         items_to_import.append(row['title'])
             
             if items_to_import:
-                return self.__addToWishlist(items_to_import)
+                from app.wishlist import add_items
+                return add_items(items_to_import)
             return 0
             
         except Exception as e:
@@ -2751,7 +2558,8 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
         try:
             import csv
             failed_items = []
-            wishlist_items = set(self.__loadWishlistItems())
+            from app.wishlist import load_items
+            wishlist_items = set(load_items())
             
             with open(log_path, 'r', newline='', encoding='utf-8') as csvfile:
                 reader = csv.DictReader(csvfile)
@@ -2765,7 +2573,8 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                         'Failed' in failure_desc or 'cancelled' in failure_desc.lower()):
                         
                         # Use smart cross-referencing to check if already in wishlist
-                        matched_item = self.__smartCrossReference(row, wishlist_items)
+                        from app.wishlist import smart_cross_reference
+                        matched_item = smart_cross_reference(row, wishlist_items)
                         
                         # If not already in wishlist, add it
                         if not matched_item:
@@ -2785,11 +2594,11 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                                 failed_items.append(combined_string)
             
             if failed_items:
-                added_count = self.__addToWishlist(failed_items)
+                from app.wishlist import add_items
+                added_count = add_items(failed_items)
                 if added_count > 0:
-                    self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                        "appendOutput:", f"\n📝 Added {added_count} failed downloads to wishlist.\n", False
-                    )
+                    from app.ui_helpers import append_output
+                    append_output(self, f"\n📝 Added {added_count} failed downloads to wishlist.\n")
                     
         except Exception as e:
             print(f"Error processing failed downloads to wishlist: {e}")
@@ -2849,7 +2658,8 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
         try:
             import csv
             successful_items = []
-            wishlist_items = set(self.__loadWishlistItems())
+            from app.wishlist import load_items
+            wishlist_items = set(load_items())
             
             with open(log_path, 'r', newline='', encoding='utf-8') as csvfile:
                 reader = csv.DictReader(csvfile)
@@ -2860,27 +2670,31 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                     
                     if (state == '1' or state_desc == 'Downloaded'):
                         # Use smart cross-referencing to find matches
-                        matched_item = self.__smartCrossReference(row, wishlist_items)
+                        from app.wishlist import smart_cross_reference
+                        matched_item = smart_cross_reference(row, wishlist_items)
                         if matched_item:
                             successful_items.append(matched_item)
             
             if successful_items:
-                removed_count = self.__removeFromWishlist(successful_items)
+                from app.wishlist import remove_items
+                removed_count = remove_items(successful_items)
                 if removed_count > 0:
-                    self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                        "appendOutput:", f"\n✅ Removed {removed_count} successful downloads from wishlist.\n", False
-                    )
+                    from app.ui_helpers import append_output
+                    append_output(self, f"\n✅ Removed {removed_count} successful downloads from wishlist.\n")
                     
         except Exception as e:
             print(f"Error removing successful downloads from wishlist: {e}")
 
     def showUpdateAlert_(self, latest_version):
         """Show update alert dialog on main thread."""
-        alert = NSAlert.alloc().init()
-        alert.setMessageText_("Update Available")
-        alert.setInformativeText_(f"You are using an old version ({APP_VERSION}). Run the install command again to update to the newest version ({latest_version}).")
-        alert.addButtonWithTitle_("OK")
-        alert.runModal()
+        try:
+            from app.ui_helpers import show_info_alert
+            show_info_alert(
+                "Update Available",
+                f"You are using an old version ({APP_VERSION}). Run the install command again to update to the newest version ({latest_version}).",
+            )
+        except Exception:
+            pass
 
 
 def main():

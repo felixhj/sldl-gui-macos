@@ -1,0 +1,143 @@
+Refactor and Code Appraisal Plan
+================================
+
+Objective
+- Make the app more efficient and lightweight without losing functionality.
+- Deliver incremental, safe edits with clear rollback points.
+
+Guiding Principles
+- Preserve current UX and behavior; changes must be risk-contained.
+- Prefer extraction and modularization over rewriting.
+- Reduce main file size and cognitive load.
+- Keep build/distribution predictable and reproducible.
+
+High-Impact Targets (Incremental Steps)
+1) Split GUI vs. logic boundaries
+- Extract non-UI logic from `sldl-gui-macos.py` into modules:
+  - `app/settings.py`: load/save JSON, defaults, validation
+  - `app/process.py`: process invocation, stop/kill, timeouts, stdout streaming
+  - `app/playlist.py`: YouTube/Spotify fetch/parse, CSV validation helpers
+  - `app/wishlist.py`: internal wishlist read/write, add/remove/dedupe/export
+  - `app/ui_helpers.py`: alert helpers, text append, formatting
+- Impact: shrink `sldl-gui-macos.py`, easier testing, clearer responsibilities.
+
+2) Normalize threading and UI sync
+- Introduce `app/threads.py`:
+  - `run_in_thread(target, name)` wrapper
+  - `ui_dispatch(selector, *args)` shim for main-thread calls
+- Replace scattered `performSelectorOnMainThread_` calls with a single utility.
+- Impact: consistent background work pattern, fewer race conditions.
+
+3) Centralize process management for `sldl`
+- Single `SldlRunner` class in `app/process.py`:
+  - Build args from settings; redact secrets in logs
+  - Stream stdout lines via callback; structured events
+  - Graceful stop (SIGINT) with timeout; force kill fallback
+- Impact: more reliable stop/cleanup; simpler `downloadThread`.
+
+4) Session logging and CSV post-processing cohesion
+- Keep `SessionLogger` and `SLDLCSVProcessor` in `csv_processor.py` but expose a thin facade:
+  - `app/session.py` orchestrates start/update/finalize and wishlist integration
+- Ensure “processed log” supersedes initial log reliably; delete initial only after successful finalization.
+- Impact: fewer special-cases in main thread; robust early-stop handling.
+
+5) Settings model and validation
+- Introduce a `Settings` dataclass with typed fields and defaults.
+- Validate at load and before run (e.g., port numeric, concurrency 1-4).
+- Persist only known keys; ignore unknowns for forward-compat.
+- Impact: fewer runtime checks, safer persistence.
+
+6) Input source abstraction
+- Define `Source` protocol:
+  - `resolve_tracks(settings) -> list[str]`
+- Implementations: `YouTubeSource`, `SpotifySource`, `WishlistSource`, `CSVSource`.
+- Impact: simplify `downloadThread` branching; easy to add new sources.
+
+7) Reduce duplication and constant sprawl
+- Move constants (layout numbers, labels, field names) to `app/constants.py`.
+- Impact: lighter UI code and uniform look/feel tweaks.
+
+8) Error handling and user messaging
+- Centralize alert creation and output appending in `app/ui_helpers.py`.
+- Standardize error messages; add error codes where useful.
+- Impact: consistent UX and easier i18n later if desired.
+
+9) Build and packaging simplifications (no behavior change)
+- Keep PyInstaller args in `pyinstaller.spec` for clarity; call from scripts.
+- Verify `bin/sldl` embedding path consistency between local and CI.
+- Impact: smaller diffs in build scripts, less drift.
+
+10) Performance quick wins (no UX change)
+- Lazy import heavy modules only where used (e.g., urllib on version check).
+- Avoid repeated regex/format computations; cache where safe.
+- Stream large file scans; avoid reading whole CSVs into memory when not needed.
+
+11) Linting and type hints (pragmatic)
+- Add minimal `ruff` and `mypy` config; type public APIs only.
+- Impact: catch regressions early without heavy ceremony.
+
+Milestones and Ordering
+- M1: `app/` scaffolding + move settings/process/session facades (no behavior change)
+- M2: Threading/UI dispatch utility; refactor `downloadThread` to use facades
+- M3: Input source abstraction; consolidate wishlist/CSV helpers
+- M4: Constants extraction; alert/output helpers
+- M5: Build spec file, lazy imports, minor perf tweaks
+
+Risk Management
+- After each milestone, smoke-test:
+  - Start/stop, user-stopped handling, .incomplete cleanup
+  - All sources: YouTube, Spotify, Wishlist, CSV
+  - Wishlist updates and CSV processed log preference
+  - Concurrent downloads 1-4, settings persistence
+- Keep functional parity; no UI label/behavior changes unless noted.
+
+Metrics of Success
+- Lines in `sldl-gui-macos.py` reduced by >30%.
+- Fewer cross-file responsibilities in main class.
+- Stop/kill reliability; no leftover processes; consistent .incomplete cleanup.
+- Session logs correct across stop/complete flows.
+
+Adoption Notes
+- All module APIs stable and minimal; keep free functions over heavy classes where possible.
+- No external dependency additions unless justified.
+
+Appendix: Proposed module map
+- app/__init__.py
+- app/constants.py
+- app/settings.py
+- app/process.py (SldlRunner)
+- app/session.py (facade around SessionLogger/SLDLCSVProcessor)
+- app/playlist.py
+- app/wishlist.py
+- app/threads.py
+- app/ui_helpers.py
+
+Progress Status (current)
+- Completed:
+  - app/settings.py integrated with load/save/validate
+  - app/process.py (SldlRunner) integrated in downloadThread with graceful stop
+  - app/session.py (SessionFacade) integrated for start/finalize log handling
+  - app/playlist.py used for playlist track retrieval and CSV export (YouTube/Spotify)
+  - app/wishlist.py used for load/save/add/remove, CSV generation/sanitization, wishlist updates from logs, and smart cross-referencing
+  - app/constants.py extracted; UI layout constants imported in build_ui
+  - app/ui_helpers.py adopted broadly for UI updates (append_output, update_status, switch_to_determinate, enable_start_button) across download flow, CSV processor, export, and cleanup messages
+  - app/threads.py adopted via run_in_thread for download start, incomplete-file cleanup, playlist CSV export, and update checks
+  - Alert helpers added and adopted: centralized NSAlert usage via show_info_alert/show_warning_alert/show_confirm_alert (quit confirm, wishlist view/clear, generic alerts, update alert)
+  - Ruff lint config added in pyproject.toml (baseline; not yet enforced)
+- Partial:
+  - UI dispatch mostly centralized; a few performSelector calls remain for specific delegate selectors (e.g., enableStopButton/saveSettings/self-dispatch) — audit/migrate later if beneficial
+- Pending:
+  - mypy config and lightweight type annotations for public functions in app/*
+  - Minor perf tweaks: lazy-import network modules (e.g., urllib), reduce repeated regex/computations
+  - Source protocol abstraction (YouTube/Spotify/Wishlist/CSV) after stability
+
+Next Steps
+1) Add mypy config; annotate public functions in app/* (lightweight types)
+2) Minor perf: lazy-import network modules (e.g., urllib), and cache repeated regex/format work where safe
+3) Audit remaining direct performSelector dispatches and convert to helpers where appropriate
+4) After the above is stable: introduce Source protocol abstraction (YouTube/Spotify/Wishlist/CSV)
+
+Process Notes
+- SldlRunner is the single entry-point for invoking sldl; output streaming is callback-driven and UI-safe via helpers
+- Stop flow prefers runner.stop(SIGINT, timeout, kill) to allow index files to be written; fallback path remains for safety
+- Finalization uses SessionFacade to prefer processed log.csv and cleans the initial session log when superseded
