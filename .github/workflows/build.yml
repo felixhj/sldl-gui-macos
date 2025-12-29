@@ -14,7 +14,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: macos-15 # Sequoia for arm64 (Apple Silicon)
+          - os: macos-14 # Sonoma for arm64 (Apple Silicon) - better backward compatibility
             arch: arm64
             python-version: '3.9'
           # Note: macos-12 (Monterey) x64 build is done locally
