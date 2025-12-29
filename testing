@@ -1,0 +1,14 @@
+12.08.25
+Reading CSVs / storing in wishlist
+-- correctly reads CSVs with either seperate or single strings
+-- correctly stores these in the wishlist, preserving seperate or single strings
+
+Checking the cross referencing logic
+-- stored as single string, searched as single string
+-- stored as single string artist title, searched as seperate strings [success]
+-- stored as single string title artist, searched as seperate string [success]
+-- stored as seperate strings, searched as single string artist title [success]
+-- stored as seperate strings, searched as single string title artist [success]
+-- (i.e. needs to check concatenated strings against the single string, but in both directions)
+
+

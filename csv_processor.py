@@ -158,22 +158,26 @@ class SessionLogger:
                 reader = csv.DictReader(csvfile)
                 for row in reader:
                     # Extract key information from sldl's format
-                    artist = row.get('artist', '')
-                    title = row.get('title', '')
+                    # Note: sldl often puts the full "artist - title" in the title field
+                    artist = row.get('artist', '').strip()
+                    title = row.get('title', '').strip()
                     state = row.get('state', '0')
                     failure_reason = row.get('failurereason', '0')
                     
-                    # Create a key for matching
+                    # Create a key for matching - sldl typically uses title field for full combined string
                     if artist and title:
                         key = f"{artist} - {title}"
+                    elif title:
+                        # sldl often stores combined string in title field when artist is empty
+                        key = title
                     else:
-                        # Fallback to combined string if available
                         key = row.get('combined_string', '')
                     
-                    sldl_results[key] = {
-                        'state': int(state) if state.isdigit() else 0,
-                        'failure_reason': int(failure_reason) if failure_reason.isdigit() else 0
-                    }
+                    if key:
+                        sldl_results[key] = {
+                            'state': int(state) if state.isdigit() else 0,
+                            'failure_reason': int(failure_reason) if failure_reason.isdigit() else 0
+                        }
             
             # Update our log with sldl's results
             rows = []
@@ -181,16 +185,19 @@ class SessionLogger:
                 reader = csv.DictReader(csvfile)
                 for row in reader:
                     # Try to match with sldl results
-                    artist = row.get('artist', '')
-                    title = row.get('title', '')
-                    combined_string = row.get('combined_string', '')
+                    artist = row.get('artist', '').strip()
+                    title = row.get('title', '').strip()
+                    combined_string = row.get('combined_string', '').strip()
                     
-                    # Create matching keys
+                    # Create matching keys - try multiple formats for flexibility
                     keys_to_try = []
                     if artist and title:
                         keys_to_try.append(f"{artist} - {title}")
                     if combined_string:
                         keys_to_try.append(combined_string)
+                    if title and title not in keys_to_try:
+                        # Also try just the title in case sldl stored the combined string there
+                        keys_to_try.append(title)
                     
                     # Find matching sldl result
                     matched = False
