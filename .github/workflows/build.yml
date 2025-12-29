@@ -14,12 +14,11 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: macos-13 # Ventura for x86_64
-            arch: x64
-            python-version: '3.9'
-          - os: macos-14 # Sonoma for arm64 (Apple Silicon)
+          - os: macos-14 # Sonoma for arm64 (Apple Silicon) - better backward compatibility
             arch: arm64
             python-version: '3.9'
+          # Note: macos-12 (Monterey) x64 build is done locally
+          # macos-13 runners have been deprecated by GitHub
 
     runs-on: ${{ matrix.os }}
 
@@ -189,10 +188,10 @@ jobs:
         run: |
           brew install create-dmg
           # Determine macOS version for naming
-          if [ "${{ matrix.os }}" = "macos-13" ]; then
-            OS_VERSION="ventura"
-          elif [ "${{ matrix.os }}" = "macos-14" ]; then
+          if [ "${{ matrix.os }}" = "macos-14" ]; then
             OS_VERSION="sonoma"
+          elif [ "${{ matrix.os }}" = "macos-15" ]; then
+            OS_VERSION="sequoia"
           fi
 
           # Create a temporary directory for DMG contents

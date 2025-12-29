@@ -968,6 +968,10 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
 
     def appendOutput_(self, text):
         """Safely append text to the output view on the main thread."""
+        # Skip empty lines or whitespace-only lines
+        if not text or (isinstance(text, str) and not text.strip()):
+            return
+        
         if not isinstance(text, NSString):
             text = NSString.stringWithString_(str(text))
         
@@ -1249,6 +1253,65 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
         except Exception as e:
             print(f"Error launching cleanup thread: {e}")
 
+    def __consolidateDownloadFolder(self, download_dir, target_dir):
+        """Move all files from download folder to the user's target directory, remove the timestamped folder."""
+        try:
+            download_path = Path(download_dir)
+            target_path = Path(target_dir)
+            
+            if not download_path.exists():
+                return
+            
+            # Ensure target exists
+            target_path.mkdir(parents=True, exist_ok=True)
+            
+            moved_files = 0
+            
+            # Move ALL files from download folder (and subfolders) to target directory
+            for file_path in download_path.rglob("*"):
+                if file_path.is_file():
+                    # Generate unique filename if collision
+                    dest_path = target_path / file_path.name
+                    if dest_path.exists():
+                        stem = file_path.stem
+                        suffix = file_path.suffix
+                        counter = 1
+                        while dest_path.exists():
+                            dest_path = target_path / f"{stem}_{counter}{suffix}"
+                            counter += 1
+                    
+                    try:
+                        file_path.rename(dest_path)
+                        moved_files += 1
+                    except Exception as e:
+                        print(f"Error moving file {file_path}: {e}")
+            
+            # Remove the now-empty timestamped folder and any subfolders
+            removed_folders = 0
+            for folder in sorted(download_path.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+                if folder.is_dir():
+                    try:
+                        if not any(folder.iterdir()):
+                            folder.rmdir()
+                            removed_folders += 1
+                    except Exception:
+                        pass
+            
+            # Remove the main timestamped folder itself
+            try:
+                if not any(download_path.iterdir()):
+                    download_path.rmdir()
+                    removed_folders += 1
+            except Exception:
+                pass
+            
+            from app.ui_helpers import append_output
+            if moved_files > 0:
+                append_output(self, f"📁 Moved {moved_files} files to {target_path}\n")
+        
+        except Exception as e:
+            print(f"Error consolidating download folder: {e}")
+
     def downloadThread(self):
         """Run the download process in a background thread."""
         try:
@@ -1433,10 +1496,18 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
             append_output(self, f"Executing: {cmd_str}\n\n")
 
             # Run the process via SldlRunner and stream output
+            # Use a queue to collect lines for both display AND progress parsing
+            import queue
+            line_queue = queue.Queue()
+            
+            def output_handler(line):
+                from app.ui_helpers import append_output as _append
+                _append(self, line)
+                line_queue.put(line)
+            
             from app.process import SldlRunner
-            from app.ui_helpers import append_output as _append
             runner = SldlRunner(self.sldl_path, Path.cwd(),
-                output_callback=lambda line: _append(self, line))
+                output_callback=output_handler)
             runner.start(cmd[1:] if cmd and isinstance(cmd, list) else [])
             self.current_process = runner.process
             self.sldl_runner = runner
@@ -1484,80 +1555,80 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
             failed_count = 0
             searching_count = 0
             
-            # Consume output already streamed via callback, but drive progress using runner.process stdout if available
-            proc = runner.process
-            stdout_iter = getattr(proc, 'stdout', None)
-            if stdout_iter is not None:
-                for line in stdout_iter:
-                    # Check if download was stopped
-                    if not self.download_running:
+            # Process output lines from the queue for progress tracking
+            # The runner's reader thread puts lines into line_queue after displaying them
+            while self.download_running:
+                try:
+                    # Non-blocking get with timeout to allow checking download_running
+                    line = line_queue.get(timeout=0.1)
+                except queue.Empty:
+                    # Check if process has finished
+                    if runner.process is None or runner.process.poll() is not None:
+                        # Drain any remaining items and process them
+                        while True:
+                            try:
+                                drain_line = line_queue.get_nowait()
+                                # Check for completion message in drained lines
+                                completed_match = re.search(r'Completed: (.*)', drain_line)
+                                if completed_match:
+                                    summary = completed_match.group(1).strip()
+                                    from app.ui_helpers import update_status
+                                    update_status(self, f"Finished: {summary}")
+                                elif drain_line.startswith("Succeeded:"):
+                                    succeeded_count += 1
+                                elif drain_line.startswith("All downloads failed:"):
+                                    failed_count += 1
+                            except queue.Empty:
+                                break
                         break
-                    
-                    # Filter out verbose logs that aren't useful to the user
-                    if (line.startswith("Downloading") and "tracks:" not in line) or line.strip() == "":
-                        pass
+                    continue
                 
-                    # --- Final progress logic based on user feedback ---
-                    if "Loading YouTube playlist" in line or "Loading Spotify playlist" in line:
-                        from app.ui_helpers import update_status
-                        update_status(self, "Loading playlist...")
-                    elif line.startswith("Login"):
-                        from app.ui_helpers import update_status
-                        update_status(self, "Logging in...")
-                    elif selected_source == "Wishlist" and "Loading" in line:
-                        from app.ui_helpers import update_status
-                        update_status(self, "Loading wishlist...")
-                    elif selected_source == "CSV File" and "Processing" in line:
-                        from app.ui_helpers import update_status
-                        update_status(self, "Processing CSV items...")
+                # Status bar updates - focus on key states only
+                # The status bar will show: Starting → x/y downloaded → Finished/Stopped
 
-                    total_match = re.search(r'Downloading (\d+) tracks:', line)
-                    if total_match:
-                        total_tracks = int(total_match.group(1))
+                total_match = re.search(r'Downloading (\d+) tracks:', line)
+                if total_match:
+                    total_tracks = int(total_match.group(1))
+                    if total_tracks > 0:
+                        max_steps = float(total_tracks)
+                        from app.ui_helpers import switch_to_determinate
+                        switch_to_determinate(self, max_steps)
+                    continue
+                
+                if selected_source == "Wishlist" and total_tracks == 0:
+                    wishlist_total_match = re.search(r'Processing (\d+) items', line)
+                    if wishlist_total_match:
+                        total_tracks = int(wishlist_total_match.group(1))
                         if total_tracks > 0:
                             max_steps = float(total_tracks)
                             from app.ui_helpers import switch_to_determinate
                             switch_to_determinate(self, max_steps)
                         continue
-                
-                    if selected_source == "Wishlist" and total_tracks == 0:
-                        wishlist_total_match = re.search(r'Processing (\d+) items', line)
-                        if wishlist_total_match:
-                            total_tracks = int(wishlist_total_match.group(1))
-                            if total_tracks > 0:
-                                max_steps = float(total_tracks)
-                                from app.ui_helpers import switch_to_determinate
-                                switch_to_determinate(self, max_steps)
-                            continue
 
-                    if line.startswith("Searching:"):
-                        searching_count += 1
-                        continue
-                    elif (selected_source == "Wishlist" or selected_source == "CSV File") and "Searching for" in line:
-                        if total_tracks > 0:
-                            current_step = float(searching_count + 1)
-                            status_message = f"Searching item {searching_count + 1}/{total_tracks}"
-                            from app.ui_helpers import update_progress_and_status
-                            update_progress_and_status(self, (current_step, status_message))
-                        searching_count += 1
-                        continue
-                    elif line.startswith("Succeeded:"):
-                        succeeded_count += 1
-                        if total_tracks > 0:
-                            current_step = float(succeeded_count)
-                            status_message = f"{succeeded_count}/{total_tracks} downloaded"
-                            from app.ui_helpers import update_progress_and_status
-                            update_progress_and_status(self, (current_step, status_message))
-                        continue
-                    elif line.startswith("All downloads failed:"):
-                        failed_count += 1
-                        continue
-                    completed_match = re.search(r'Completed: (.*)', line)
-                    if completed_match:
-                        summary = completed_match.group(1).strip()
-                        from app.ui_helpers import update_status
-                        update_status(self, f"Finished: {summary}")
-                        continue
+                if line.startswith("Searching:"):
+                    searching_count += 1
+                    continue
+                elif (selected_source == "Wishlist" or selected_source == "CSV File") and "Searching for" in line:
+                    # Just count searches, don't update status bar (too noisy)
+                    searching_count += 1
+                    continue
+                elif line.startswith("Succeeded:"):
+                    succeeded_count += 1
+                    if total_tracks > 0:
+                        current_step = float(succeeded_count)
+                        status_message = f"{succeeded_count}/{total_tracks} downloaded"
+                        from app.ui_helpers import update_progress_and_status
+                        update_progress_and_status(self, (current_step, status_message))
+                    continue
+                elif line.startswith("All downloads failed:"):
+                    failed_count += 1
+                    continue
+                completed_match = re.search(r'Completed: (.*)', line)
+                if completed_match:
+                    summary = completed_match.group(1).strip()
+                    from app.ui_helpers import update_status
+                    update_status(self, f"Finished: {summary}")
+                    continue
                 
 
             # Wait for process to complete (only if not stopped)
@@ -1669,6 +1740,16 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                 finally:
                     # Clear session facade reference
                     self.session_facade = None
+            
+            # Consolidate download folder - move files to user's target directory and remove timestamped subfolder
+            # Only for CSV and Wishlist sources which use timestamped subfolders
+            if 'actual_download_dir' in locals() and actual_download_dir:
+                try:
+                    # Target is the user's specified path (or cwd if not specified)
+                    user_target = Path(path) if path else Path.cwd()
+                    self.__consolidateDownloadFolder(actual_download_dir, user_target)
+                except Exception as e:
+                    print(f"Error consolidating folder: {e}")
             
             # Re-enable the start button and disable stop button
             from app.ui_helpers import enable_start_button

@@ -1,6 +1,6 @@
 # UI Layout Constants
-WINDOW_WIDTH: float = 750.0
-WINDOW_HEIGHT: float = 680.0
+WINDOW_WIDTH: float = 850.0
+WINDOW_HEIGHT: float = 780.0
 
 # Layout
 PADDING: float = 20.0

@@ -1,1 +1,2 @@
-- messy folder creation when using csv or wishlist as sources
+# All bugs fixed in this session - 2025-12-29
+
