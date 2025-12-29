@@ -41,6 +41,21 @@ class SessionFacade:
         """Check if the session log file exists."""
         return self.logger.log_exists()
 
+    def merge_sldl_results(self, index_file_path: str) -> bool:
+        """Merge sldl's _index.csv results into session log without replacing it.
+        
+        Updates tracks in session log with their actual status from sldl's index,
+        while preserving tracks that sldl didn't process (marked as session stopped).
+        
+        Returns True if merge was successful, False otherwise.
+        """
+        try:
+            result: Any = self.logger.process_sldl_index_file(index_file_path)
+            return bool(result)
+        except Exception as e:
+            print(f"Error merging sldl results: {e}")
+            return False
+
     def finalize_and_prefer_processed(self, index_file_path: str) -> Optional[Path]:
         """Process sldl _index.csv into log.csv, delete initial session log if superseded.
 

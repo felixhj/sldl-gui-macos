@@ -1193,14 +1193,16 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                         self.sldl_runner.stop(graceful_seconds=5.0)
                     except Exception:
                         pass
-                else:
+                elif self.current_process:
                     # Fallback to process termination
                     self.current_process.terminate()
-                try:
-                    self.current_process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    self.current_process.kill()
-                    self.current_process.wait()
+                # Only wait if process still exists
+                if self.current_process:
+                    try:
+                        self.current_process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        self.current_process.kill()
+                        self.current_process.wait()
             except Exception as e:
                 from app.ui_helpers import append_output
                 append_output(self, f"❌ Error stopping download: {str(e)}\n")
@@ -1258,6 +1260,9 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
             # Generate timestamp for folder naming
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             
+            # Track actual download directory (may include timestamped subfolder)
+            actual_download_dir = None
+            
             if selected_source == "YouTube Playlist":
                 input_source = self.playlist_field.stringValue().strip()
                 # Build base command for YouTube
@@ -1298,6 +1303,7 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                     # If no path specified, create in current directory
                     csv_folder = Path.cwd() / f"csv_{timestamp}"
                     cmd.extend(['--path', str(csv_folder)])
+                actual_download_dir = csv_folder
             else:  # Wishlist
                 # Create temporary CSV file from wishlist
                 from app.wishlist import create_csv_from_wishlist
@@ -1319,6 +1325,7 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
                     # If no path specified, create in current directory
                     wishlist_folder = Path.cwd() / f"wishlist_{timestamp}"
                     cmd.extend(['--path', str(wishlist_folder)])
+                actual_download_dir = wishlist_folder
 
             port = self.port_field.stringValue().strip()
             if port and port.isdigit():
@@ -1383,8 +1390,13 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
             
             # Initialize session logging via facade if we have tracks
             if tracks_to_download:
-                download_dir = Path(path) if path else Path.cwd()
-                self.session_facade = SessionFacade(download_dir)
+                # Use actual_download_dir for CSV/Wishlist (includes timestamped subfolder),
+                # fall back to base path for other sources
+                if actual_download_dir:
+                    session_log_dir = actual_download_dir
+                else:
+                    session_log_dir = Path(path) if path else Path.cwd()
+                self.session_facade = SessionFacade(session_log_dir)
                 source_type = selected_source.lower().replace(' ', '_')
                 if self.session_facade.start(tracks_to_download, source_type):
                     from app.ui_helpers import append_output
@@ -1601,34 +1613,56 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
             # Finalize logs via session facade if active
             if getattr(self, 'session_facade', None):
                 try:
-                    # Determine base download directory
-                    if path:
+                    # Determine download directory - use actual_download_dir if set (CSV/Wishlist),
+                    # otherwise fall back to base path
+                    if 'actual_download_dir' in locals() and actual_download_dir:
+                        download_dir = actual_download_dir
+                    elif path:
                         download_dir = Path(path)
                     else:
                         download_dir = Path.cwd()
 
-                    # Attempt to find and process the most recent sldl index file
-                    processed_log_path = None
-                    index_files = list(download_dir.rglob("_index.csv"))
-                    if index_files:
-                        index_file = max(index_files, key=lambda f: f.stat().st_mtime)
-
-                        # Convert sldl's _index.csv into a human-readable log.csv in the same folder
-                        processed = self.session_facade.finalize_and_prefer_processed(str(index_file))
-                        if processed:
-                            processed_log_path = processed
-                            from app.ui_helpers import append_output
-                            append_output(self, "📝 Processed sldl index file into log.csv\n")
-
-                    # Wishlist updates: prefer processed log.csv if available; otherwise fallback to initial session log
-                    if self.wishlist_mode_checkbox.state():
-                        if processed_log_path and processed_log_path.exists():
-                            self.__processFailedDownloadsToWishlist(str(processed_log_path))
-                            self.__removeSuccessfulDownloadsFromWishlist(str(processed_log_path))
-                        elif self.session_facade.log_exists():
+                    # When user stopped the download, merge sldl's results into session log
+                    # This updates tracks with their actual status while keeping unprocessed tracks
+                    if self.user_stopped:
+                        # First, try to find and merge sldl's _index.csv results
+                        index_files = list(download_dir.rglob("_index.csv"))
+                        if index_files:
+                            index_file = max(index_files, key=lambda f: f.stat().st_mtime)
+                            if self.session_facade.merge_sldl_results(str(index_file)):
+                                from app.ui_helpers import append_output
+                                append_output(self, "📝 Merged sldl results into session log\n")
+                        
+                        # Use the merged session log for wishlist updates
+                        if self.wishlist_mode_checkbox.state() and self.session_facade.log_exists():
                             log_path = self.session_facade.get_log_path()
+                            from app.ui_helpers import append_output
+                            append_output(self, f"📝 Using merged session log for wishlist update\n")
                             self.__processFailedDownloadsToWishlist(log_path)
                             self.__removeSuccessfulDownloadsFromWishlist(log_path)
+                    else:
+                        # Normal completion - process sldl's index file
+                        processed_log_path = None
+                        index_files = list(download_dir.rglob("_index.csv"))
+                        if index_files:
+                            index_file = max(index_files, key=lambda f: f.stat().st_mtime)
+
+                            # Convert sldl's _index.csv into a human-readable log.csv in the same folder
+                            processed = self.session_facade.finalize_and_prefer_processed(str(index_file))
+                            if processed:
+                                processed_log_path = processed
+                                from app.ui_helpers import append_output
+                                append_output(self, "📝 Processed sldl index file into log.csv\n")
+
+                        # Wishlist updates: prefer processed log.csv if available; otherwise fallback to initial session log
+                        if self.wishlist_mode_checkbox.state():
+                            if processed_log_path and processed_log_path.exists():
+                                self.__processFailedDownloadsToWishlist(str(processed_log_path))
+                                self.__removeSuccessfulDownloadsFromWishlist(str(processed_log_path))
+                            elif self.session_facade.log_exists():
+                                log_path = self.session_facade.get_log_path()
+                                self.__processFailedDownloadsToWishlist(log_path)
+                                self.__removeSuccessfulDownloadsFromWishlist(log_path)
 
                 except Exception as e:
                     print(f"Error finalizing logs: {e}")
