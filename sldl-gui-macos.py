@@ -7,10 +7,6 @@ import json
 import sys
 import re
 import unicodedata
-import urllib.request
-import urllib.error
-import urllib.parse
-import ssl
 import datetime
 from pathlib import Path
 
@@ -51,6 +47,11 @@ WISHLIST_FILE = Path.home() / ".soulseek_downloader_wishlist.csv"
 
 def check_for_updates():
     """Check for updates by comparing current version with latest GitHub release."""
+    # Lazy imports for faster startup
+    import urllib.request
+    import urllib.error
+    import ssl
+    
     try:
         # GitHub API endpoint for releases
         url = "https://api.github.com/repos/felixhj/sldl-gui-macos/releases/latest"
@@ -835,6 +836,7 @@ class AppDelegate(NSObject):
         import subprocess
         import platform
         import datetime
+        import urllib.parse
         
         try:
             # Get current date/time
@@ -1315,240 +1317,113 @@ Cursor did all the rest, so a thank you to big ai, I guess?"""
     def downloadThread(self):
         """Run the download process in a background thread."""
         try:
+            from app.sources import create_source, SourceConfig, build_sldl_args
+            from app.ui_helpers import append_output, switch_to_determinate, update_status
+            from app.process import SldlRunner
+            from app.playlist import get_playlist_tracks
+            import queue
+            
             selected_source = self.source_popup.titleOfSelectedItem()
             username = self.user_field.stringValue().strip()
             password = self.pass_field.stringValue().strip()
             path = self.path_field.stringValue().strip()
-            
-            # Generate timestamp for folder naming
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            clean_search = bool(self.clean_search_checkbox.state())
             
-            # Track actual download directory (may include timestamped subfolder)
-            actual_download_dir = None
+            # Create source based on selection
+            source_kwargs = {'clean_search': clean_search}
+            if selected_source == "YouTube Playlist":
+                source_kwargs['playlist_url'] = self.playlist_field.stringValue().strip()
+            elif selected_source == "Spotify Playlist":
+                source_kwargs['playlist_url'] = self.spotify_field.stringValue().strip()
+            elif selected_source == "CSV File":
+                source_kwargs['csv_path'] = self.csv_field.stringValue().strip()
             
-            if selected_source == "YouTube Playlist":
-                input_source = self.playlist_field.stringValue().strip()
-                # Build base command for YouTube
-                cmd = [str(self.sldl_path), input_source, '--user', username, '--pass', password]
-                if path:
-                    cmd.extend(['--path', path])
-            elif selected_source == "Spotify Playlist":
-                input_source = self.spotify_field.stringValue().strip()
-                # Build base command for Spotify
-                cmd = [str(self.sldl_path), input_source, '--user', username, '--pass', password]
-                if path:
-                    cmd.extend(['--path', path])
-            elif selected_source == "CSV File":
-                # Use CSV file directly with csv input type
-                csv_path = self.csv_field.stringValue().strip()
-                if not csv_path:
-                    from app.ui_helpers import append_output
-                    append_output(self, "❌ No CSV file specified.\n")
-                    return
-                
-                # Pass CSV file to sldl, optionally via a sanitized temporary copy
-                input_source = csv_path
-                try:
-                    if self.clean_search_checkbox.state():
-                        from app.wishlist import create_sanitized_copy_of_csv
-                        sanitized_csv = create_sanitized_copy_of_csv(csv_path)
-                        if sanitized_csv:
-                            input_source = sanitized_csv
-                except Exception as e:
-                    print(f"Error preparing sanitized CSV: {e}")
-                # Build base command for CSV with csv input-type parameter
-                cmd = [str(self.sldl_path), input_source, '--input-type', 'csv', '--user', username, '--pass', password]
-                if path:
-                    # Create custom folder name for CSV: csv_YYYYMMDD_HHMMSS
-                    csv_folder = Path(path) / f"csv_{timestamp}"
-                    cmd.extend(['--path', str(csv_folder)])
-                else:
-                    # If no path specified, create in current directory
-                    csv_folder = Path.cwd() / f"csv_{timestamp}"
-                    cmd.extend(['--path', str(csv_folder)])
-                actual_download_dir = csv_folder
-            else:  # Wishlist
-                # Create temporary CSV file from wishlist
-                from app.wishlist import create_csv_from_wishlist
-                temp_csv_file = create_csv_from_wishlist(bool(self.clean_search_checkbox.state()))
-                if not temp_csv_file:
-                    from app.ui_helpers import append_output
-                    append_output(self, "❌ Failed to create CSV file from wishlist.\n")
-                    return
-                
-                # Pass CSV file to sldl
-                input_source = temp_csv_file
-                # Build base command for wishlist with csv input-type parameter
-                cmd = [str(self.sldl_path), input_source, '--input-type', 'csv', '--user', username, '--pass', password]
-                if path:
-                    # Create custom folder name for wishlist: wishlist_YYYYMMDD_HHMMSS
-                    wishlist_folder = Path(path) / f"wishlist_{timestamp}"
-                    cmd.extend(['--path', str(wishlist_folder)])
-                else:
-                    # If no path specified, create in current directory
-                    wishlist_folder = Path.cwd() / f"wishlist_{timestamp}"
-                    cmd.extend(['--path', str(wishlist_folder)])
-                actual_download_dir = wishlist_folder
-
-            port = self.port_field.stringValue().strip()
-            if port and port.isdigit():
-                cmd.extend(['--listen-port', port])
-
-            # Add concurrent downloads parameter
-            concurrent_downloads = self.concurrent_popup.titleOfSelectedItem()
-            if concurrent_downloads:
-                cmd.extend(['--concurrent-downloads', concurrent_downloads])
-
-            # Add format/quality parameters
-            # Preferred parameters
-            pref_format = self.pref_format_popup.titleOfSelectedItem()
-            if pref_format and pref_format != "Any":
-                cmd.extend(['--pref-format', pref_format])
-
-            pref_min_bitrate = self.pref_min_bitrate_field.stringValue().strip()
-            if pref_min_bitrate and pref_min_bitrate.isdigit():
-                cmd.extend(['--pref-min-bitrate', pref_min_bitrate])
-
-            pref_max_bitrate = self.pref_max_bitrate_field.stringValue().strip()
-            if pref_max_bitrate and pref_max_bitrate.isdigit():
-                cmd.extend(['--pref-max-bitrate', pref_max_bitrate])
-
-            # Strict parameters
-            strict_format = self.strict_format_popup.titleOfSelectedItem()
-            if strict_format and strict_format != "Any":
-                cmd.extend(['--format', strict_format])
-
-            strict_min_bitrate = self.strict_min_bitrate_field.stringValue().strip()
-            if strict_min_bitrate and strict_min_bitrate.isdigit():
-                cmd.extend(['--min-bitrate', strict_min_bitrate])
-
-            strict_max_bitrate = self.strict_max_bitrate_field.stringValue().strip()
-            if strict_max_bitrate and strict_max_bitrate.isdigit():
-                cmd.extend(['--max-bitrate', strict_max_bitrate])
-
-            # Initialize session logger based on source type
-            tracks_to_download = []
-            if selected_source == "YouTube Playlist":
-                # For YouTube, we'll get tracks after the command is built
-                pass
-            elif selected_source == "Spotify Playlist":
-                # For Spotify, we'll get tracks after the command is built
-                pass
-            elif selected_source == "CSV File":
-                # For CSV, get tracks from the CSV file
-                csv_path = self.csv_field.stringValue().strip()
-                if csv_path:
-                    import csv
-                    with open(csv_path, 'r', newline='', encoding='utf-8') as csvfile:
-                        reader = csv.DictReader(csvfile)
-                        for row in reader:
-                            if 'title' in row and 'artist' in row and row['artist'] and row['title']:
-                                tracks_to_download.append(f"{row['artist']} - {row['title']}")
-                            elif 'title' in row and row['title']:
-                                # For CSV with only title column, use title as search string
-                                tracks_to_download.append(row['title'])
-            else:  # Wishlist
-                # For wishlist, get tracks from wishlist file
-                tracks_to_download = self.__loadWishlistItems()
+            source = create_source(selected_source, **source_kwargs)
+            if source is None:
+                append_output(self, f"❌ Unknown source type: {selected_source}\n")
+                return
+            
+            # Validate source
+            validation_error = source.validate()
+            if validation_error:
+                append_output(self, f"❌ {validation_error}\n")
+                return
+            
+            # Build config for command generation
+            config = SourceConfig(
+                sldl_path=str(self.sldl_path),
+                username=username,
+                password=password,
+                download_path=path,
+                timestamp=timestamp,
+                clean_search=clean_search,
+                listen_port=self.port_field.stringValue().strip(),
+                concurrent_downloads=self.concurrent_popup.titleOfSelectedItem() or "2",
+                pref_format=self.pref_format_popup.titleOfSelectedItem() or "Any",
+                pref_min_bitrate=self.pref_min_bitrate_field.stringValue().strip(),
+                pref_max_bitrate=self.pref_max_bitrate_field.stringValue().strip(),
+                strict_format=self.strict_format_popup.titleOfSelectedItem() or "Any",
+                strict_min_bitrate=self.strict_min_bitrate_field.stringValue().strip(),
+                strict_max_bitrate=self.strict_max_bitrate_field.stringValue().strip(),
+            )
+            
+            # Build command from source
+            base_args = source.build_base_args(config)
+            if not base_args:
+                append_output(self, "❌ Failed to build command arguments.\n")
+                return
+            
+            # Add common sldl args (port, concurrency, format, bitrate)
+            cmd = [str(self.sldl_path)] + base_args + build_sldl_args(config)
+            
+            # Get download directory (may include timestamped subfolder)
+            actual_download_dir = source.get_download_dir(path, timestamp) if source.uses_timestamped_folder else None
+            
+            # Get tracks for session logging
+            tracks_to_download = source.get_tracks()
+            
+            # For YouTube/Spotify, fetch tracks dynamically via sldl
+            if selected_source in ["YouTube Playlist", "Spotify Playlist"]:
+                def builder():
+                    return self.__createSldlWishlistFile()
+                src_value = source_kwargs.get('playlist_url', '')
+                tracks_to_download = get_playlist_tracks(self.sldl_path, selected_source, src_value, temp_wishlist_builder=builder)
             
             # Initialize session logging via facade if we have tracks
             if tracks_to_download:
-                # Use actual_download_dir for CSV/Wishlist (includes timestamped subfolder),
-                # fall back to base path for other sources
-                if actual_download_dir:
-                    session_log_dir = actual_download_dir
-                else:
-                    session_log_dir = Path(path) if path else Path.cwd()
+                session_log_dir = actual_download_dir if actual_download_dir else (Path(path) if path else Path.cwd())
                 self.session_facade = SessionFacade(session_log_dir)
                 source_type = selected_source.lower().replace(' ', '_')
                 if self.session_facade.start(tracks_to_download, source_type):
-                    from app.ui_helpers import append_output
                     append_output(self, f"📝 Session logging initialized with {len(tracks_to_download)} tracks\n")
                 else:
-                    from app.ui_helpers import append_output
                     append_output(self, "⚠️ Failed to initialize session logging\n")
             
-            # For YouTube and Spotify playlists, get tracks and initialize session logging via facade
-            if selected_source in ["YouTube Playlist", "Spotify Playlist"]:
-                from app.playlist import get_playlist_tracks
-                def builder():
-                    # Reuse existing internal builders
-                    if selected_source == "CSV File":
-                        return self.__createSldlWishlistFileFromCSV()
-                    else:
-                        return self.__createSldlWishlistFile()
-                src_value = self.playlist_field.stringValue().strip() if selected_source == "YouTube Playlist" else self.spotify_field.stringValue().strip()
-                tracks_to_download = get_playlist_tracks(self.sldl_path, selected_source, src_value, temp_wishlist_builder=builder)
-                if tracks_to_download:
-                    download_dir = Path(path) if path else Path.cwd()
-                    self.session_facade = SessionFacade(download_dir)
-                    source_type = selected_source.lower().replace(' ', '_')
-                    if self.session_facade.start(tracks_to_download, source_type):
-                        from app.ui_helpers import append_output
-                        append_output(self, f"📝 Session logging initialized with {len(tracks_to_download)} tracks\n")
-                    else:
-                        from app.ui_helpers import append_output
-                        append_output(self, "⚠️ Failed to initialize session logging\n")
-            
             # Show the command being executed
-            cmd_str = " ".join(cmd).replace(password, "***")  # Hide password
-            from app.ui_helpers import append_output
+            cmd_str = " ".join(cmd).replace(password, "***")
             append_output(self, f"Executing: {cmd_str}\n\n")
 
             # Run the process via SldlRunner and stream output
-            # Use a queue to collect lines for both display AND progress parsing
-            import queue
             line_queue = queue.Queue()
             
             def output_handler(line):
-                from app.ui_helpers import append_output as _append
-                _append(self, line)
+                append_output(self, line)
                 line_queue.put(line)
             
-            from app.process import SldlRunner
-            runner = SldlRunner(self.sldl_path, Path.cwd(),
-                output_callback=output_handler)
+            runner = SldlRunner(self.sldl_path, Path.cwd(), output_callback=output_handler)
             runner.start(cmd[1:] if cmd and isinstance(cmd, list) else [])
             self.current_process = runner.process
             self.sldl_runner = runner
             
-            # Store temp file for cleanup (if wishlist source)
-            temp_file_to_cleanup = None
-            initial_total_tracks = 0
-            if selected_source == "Wishlist":
-                temp_file_to_cleanup = input_source
-                # For wishlist, we can estimate total tracks from wishlist items
-                try:
-                    wishlist_items = self.__loadWishlistItems()
-                    initial_total_tracks = len(wishlist_items)
-                    if initial_total_tracks > 0:
-                        # Set initial progress for wishlist
-                        from app.ui_helpers import switch_to_determinate, update_status
-                        switch_to_determinate(self, float(initial_total_tracks))
-                        update_status(self, f"Processing {initial_total_tracks} wishlist items...")
-                except:
-                    pass  # Fall back to dynamic detection
-            elif selected_source == "CSV File":
-                # For CSV file, we can estimate total tracks from CSV items
-                try:
-                    csv_path = self.csv_field.stringValue().strip()
-                    import csv
-                    csv_items = []
-                    with open(csv_path, 'r', newline='', encoding='utf-8') as csvfile:
-                        reader = csv.DictReader(csvfile)
-                        for row in reader:
-                            if 'title' in row and 'artist' in row and row['artist'] and row['title']:
-                                csv_items.append(f"{row['artist']} - {row['title']}")
-                            elif 'title' in row and row['title']:
-                                csv_items.append(row['title'])
-                    initial_total_tracks = len(csv_items)
-                    if initial_total_tracks > 0:
-                        # Set initial progress for CSV file
-                        from app.ui_helpers import switch_to_determinate, update_status
-                        switch_to_determinate(self, float(initial_total_tracks))
-                        update_status(self, f"Processing {initial_total_tracks} CSV items...")
-                except:
-                    pass  # Fall back to dynamic detection
+            # Store temp file for cleanup
+            temp_file_to_cleanup = source.get_temp_file()
+            
+            # Set initial progress if we know track count
+            initial_total_tracks = len(tracks_to_download) if tracks_to_download else 0
+            if initial_total_tracks > 0 and source.uses_timestamped_folder:
+                switch_to_determinate(self, float(initial_total_tracks))
+                update_status(self, f"Processing {initial_total_tracks} {source.name.lower()} items...")
 
             total_tracks = initial_total_tracks
             succeeded_count = 0
